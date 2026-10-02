@@ -3,7 +3,15 @@ requires = [ "nodejs-24" ]
 project_type = "web"
 template = "nextjs"
 version = "0.1.9"
+sub_id = "da716c72"
+name = "需求拆解师"
 appliedPatches = [ ]
+
+[preview]
+preview_enable = "enabled"
+
+[subprojects]
+path = ["."]
 
 [dev]
 build = [ "bash", "./scripts/prepare.sh" ]
@@ -55,3 +63,10 @@ run_win = [
   "./scripts/start.ps1"
 ]
 deps = [ "git" ]
+
+[deploy.profile]
+kind = "service"
+flavor = "web"
+
+[deploy.backend]
+enabled = true

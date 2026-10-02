@@ -1,65 +1,75 @@
 # 项目上下文
 
-### 版本技术栈
+## 项目概述
 
-- **Framework**: Next.js 16 (App Router)
-- **Core**: React 19
-- **Language**: TypeScript 5
-- **UI 组件**: shadcn/ui (基于 Radix UI)
-- **Styling**: Tailwind CSS 4
+「需求拆解师」——科创大赛用的对话式需求拆解 Web 应用。
+用户输入一个模糊想法 → 后端调用扣子（Coze）工作流判断清晰度 → 不够清楚则返回追问、继续对话 → 清晰度足够则返回完整拆解报告（方案 + 行动清单）。
+**判断与拆解逻辑全部由扣子工作流完成，本仓库只负责对话交互、多轮上下文维护与报告展示。**
+
+## 技术栈
+
+- **Framework**: Next.js 16 (App Router) + 自定义服务端入口 `src/server.ts`
+- **Core**: React 19，**TypeScript 5**
+- **UI/Styling**: Tailwind CSS 4 + 少量手写 CSS（工程蓝图风格，见 `DESIGN.md`）
+- **包管理器**: `pnpm`（严禁 npm/yarn）
+- **后端**: Next.js Route Handler（`src/app/api/chat/route.ts`），Node runtime 下调用 Coze 工作流 REST API
 
 ## 目录结构
 
 ```
-├── public/                 # 静态资源
-├── scripts/                # 构建与启动脚本
-│   ├── build.sh            # 构建脚本
-│   ├── dev.sh              # 开发环境启动脚本
-│   ├── prepare.sh          # 预处理脚本
-│   └── start.sh            # 生产环境启动脚本
+├── scripts/                 # 构建/启动/预览脚本（模板自带）
+│   ├── build.sh  start.sh   # 生产构建与启动（端口 5000）
+│   ├── dev.sh  prepare.sh   # 开发/预览
+│   └── ...
 ├── src/
-│   ├── app/                # 页面路由与布局
-│   ├── components/ui/      # Shadcn UI 组件库
-│   ├── hooks/              # 自定义 Hooks
-│   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
-│   └── server.ts           # 自定义服务端入口
-├── next.config.ts          # Next.js 配置
-├── package.json            # 项目依赖管理
-└── tsconfig.json           # TypeScript 配置
+│   ├── app/
+│   │   ├── page.tsx         # 聊天主页面（'use client'）
+│   │   ├── layout.tsx       # 根布局（metadata 中文标题）
+│   │   ├── api/chat/route.ts# 后端：多轮上下文 + 调用扣子工作流 + 解析字段
+│   │   └── globals.css      # 全局样式 + 蓝图网格 + 打印样式
+│   ├── components/ReportView.tsx  # 报告渲染器（Markdown-lite / JSON，优先级标签，可打印）
+│   ├── lib/
+│   │   ├── coze-config.ts   # 工作流配置（WORKFLOW_ID / inputParam / apiBase）
+│   │   └── coze.ts          # 工作流调用、解析、多轮上下文、换话题检测
+│   └── server.ts            # Next 自定义 HTTP 入口（读 PORT，默认 5000）
+├── .env.example             # 环境变量模板（COZE_PAT 等）
+├── .coze                    # 项目/预览/部署配置
+└── DESIGN.md                # 设计风格（工程蓝图意象）
 ```
 
-- 项目文件（如 app 目录、pages 目录、components 等）默认初始化到 `src/` 目录下。
+## 关键入口 / 核心模块
 
-## 包管理规范
+- **前端对话入口**: `src/app/page.tsx` — 聊天气泡 UI、localStorage 会话持久化、`/api/chat` 调用、报告展示。
+- **后端接口**: `POST /api/chat`，body `{ sessionId, message }`
+  - 返回 `{ type: 'question', clarity, content, round }`（clarity ≤ 1，显示追问）或 `{ type: 'solution', clarity, content, round }`（clarity ≥ 2，渲染报告）。
+  - 未配置时返回 `503 { error: 'COZE_NOT_CONFIGURED' }`，前端显示设置的琥珀色提示条。
+- **工作流接入**: `src/lib/coze.ts`
+  - 调 `POST https://api.coze.cn/v1/workflow/run`（`is_async: false`）。
+  - `data` 字段是 JSON 字符串，需 `JSON.parse` 解析两层。
+  - 从返回值稳妥提取 `clarity`(number)、`question_result`、`solution_result`（多层嵌套查找）。
+  - 每个 sessionId 用内存 Map 保存多轮用户消息，拼成 `第1轮:[…] 第2轮:[…]` 传入参数；命中「新需求/换话题」触发词时清空历史。
 
-**仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
-**常用命令**：
-- 安装依赖：`pnpm add <package>`
-- 安装开发依赖：`pnpm add -D <package>`
-- 安装所有依赖：`pnpm install`
-- 移除依赖：`pnpm remove <package>`
+## 运行与预览
 
-## 开发规范
+- 可预览型（`project_type = web`，`preview_enable = enabled`），预览暴露端口 **5000**（读 `.preview` 的 `expose_port`）。
+- 预览：`bash ./scripts/dev.sh`（[dev].run）；生产构建/启动：`bash ./scripts/build.sh` / `bash ./scripts/start.sh`（[deploy]，`src/server.ts` 读 `PORT`=5000）。
+- 验收：web 项目统一用 `test_run` 做静态检查（lint/ts-check）+ 接口冒烟 + 服务探活。
 
-### 编码规范
+## 配置清单（演示/部署前必填）
 
-- 默认按 TypeScript `strict` 心智写代码；优先复用当前作用域已声明的变量、函数、类型和导入，禁止引用未声明标识符或拼错变量名。
-- 禁止隐式 `any` 和 `as any`；函数参数、返回值、解构项、事件对象、`catch` 错误在使用前应有明确类型或先完成类型收窄，并清理未使用的变量和导入。
+1. **COZE_PAT**（机密）：放环境变量（`.env.local` 或部署平台环境变量），严禁写进前端代码与配置文件。
+2. **WORKFLOW_ID**：填 `src/lib/coze-config.ts` 的 `workflowId`（也可用环境变量 `WORKFLOW_ID` 覆盖）。
+3. **输入参数名**：按工作流「开始」节点实际参数名填 `coze-config.ts` 的 `inputParam`（默认 `context`）。
 
-### next.config 配置规范
+## 用户偏好与长期约束
 
-- 配置的路径不要写死绝对路径，必须使用 path.resolve(__dirname, ...)、import.meta.dirname 或 process.cwd() 动态拼接。
+- 判断与拆解逻辑只由扣子工作流负责，前端不重复实现 AI 判断逻辑。
+- COZE_PAT 只通过后端环境变量读取，绝不进前端。
+- 多轮上下文由后端维护；前端 localStorage 仅缓存渲染消息，供刷新后恢复展示。
 
-### Hydration 问题防范
+## 常见问题和预防
 
-1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random() 等动态数据。**必须使用 'use client' 并配合 useEffect + useState 确保动态内容仅在客户端挂载后渲染**；同时严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）。
-2. **禁止使用 head 标签**，优先使用 metadata，详见文档：https://nextjs.org/docs/app/api-reference/functions/generate-metadata
-   1. 三方 CSS、字体等资源可在 `globals.css` 中顶部通过 `@import` 引入或使用 next/font
-   2. preload, preconnect, dns-prefetch 通过 ReactDOM 的 preload、preconnect、dns-prefetch 方法引入
-   3. json-ld 可阅读 https://nextjs.org/docs/app/guides/json-ld
-
-## UI 设计与组件规范 (UI & Styling Standards)
-
-- 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
-- Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+- **未配置导致对话报错**：初次使用需先填 COZE_PAT / WORKFLOW_ID / inputParam，否则 `/api/chat` 返回 `COZE_NOT_CONFIGURED`。
+- **工作流返回解析**：`data` 需解析两层 JSON；字段缺失时走默认值，避免前端崩溃。
+- **换话题误清空**：仅整段匹配「新需求 / 换话题 / 重新开始」等触发词，对话正文中出现这些词不会被清空。
+- **Hydration**：聊天页为 `'use client'`，localStorage 读取在 `useEffect` 中完成并先置 `hydrated`，避免 SSR/CSR 不一致；报告组件内 `window.print` 仅在点击时调用。
