@@ -6,160 +6,136 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius: 16px;
   --font-sans:
-    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif,
-    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
-  --font-serif:
-    'Noto Serif SC', 'Songti SC', 'SimSun', ui-serif, Georgia, Cambria,
-    'Times New Roman', Times, serif;
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
+    'Helvetica Neue', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 16px;
+  /* Apple 设计语言 */
+  --background: #ffffff;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #0071e3;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f7;
+  --secondary-foreground: #1d1d1f;
+  --muted: #f5f5f7;
+  --muted-foreground: #86868b;
+  --accent: #0071e3;
+  --accent-foreground: #ffffff;
+  --destructive: #ff3b30;
+  --border: #e8e8ed;
+  --input: #e8e8ed;
+  --ring: #0071e3;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
-
-body {
-  @apply font-sans;
-}
-
-/* ===== 需求拆解师 · 工程蓝图风格 ===== */
 html,
 body {
   height: 100%;
 }
 
-.gridline {
-  background-image:
-    linear-gradient(to right, rgba(30, 41, 59, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(30, 41, 59, 0.035) 1px, transparent 1px);
-  background-size: 22px 22px;
-  opacity: 0.55;
+body {
+  @apply font-sans antialiased;
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* 打字指示动画 */
+/* ===== Apple 设计语言组件 ===== */
+
+/* 背景蓝紫光斑（克制缓慢漂移） */
+.hero-glow {
+  position: fixed;
+  inset: auto;
+  width: 520px;
+  height: 520px;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgba(0, 113, 227, 0.10), rgba(124, 58, 237, 0.05), transparent);
+  filter: blur(60px);
+  pointer-events: none;
+  animation: glow-drift 36s ease-in-out infinite alternate;
+}
+@keyframes glow-drift {
+  from {
+    transform: translate3d(-4%, -3%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 5%, 0) scale(1.06);
+  }
+}
+
+/* 淡入 */
+.fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 轻微缩放 + 淡入 */
+.scale-in {
+  animation: scale-in 0.4s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 毛玻璃 */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+.glass-strong {
+  background: rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* 打字指示 */
 @keyframes typing {
   0%,
   60%,
   100% {
     transform: translateY(0);
-    opacity: 0.4;
+    opacity: 0.35;
   }
   30% {
-    transform: translateY(-3px);
+    transform: translateY(-2px);
     opacity: 1;
   }
 }
@@ -173,16 +149,30 @@ body {
   animation-delay: 0.3s;
 }
 
-/* 打印：仅输出需求拆解报告 */
+/* 深度模式节点进度：逐条浮现 */
+@keyframes node-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.node-pop {
+  animation: node-pop 0.35s ease-out both;
+}
+
+/* 打印：仅输出报告 */
 @media print {
   body {
     background: #fff;
   }
   .no-print,
-  .chat-root > header,
-  .chat-root > div:last-child,
-  span[class*='rounded-full'].inline-flex,
-  .gridline {
+  .app-nav,
+  .msg-input,
+  .hero-stage {
     display: none !important;
   }
   body * {
@@ -197,8 +187,9 @@ body {
     left: 0;
     top: 0;
     width: 100%;
+    max-width: none !important;
     border: none !important;
-    border-radius: 0 !important;
     box-shadow: none !important;
+    border-radius: 0 !important;
   }
 }

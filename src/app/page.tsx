@@ -1,19 +1,36 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, Plus, Send, Settings2, AlertTriangle } from 'lucide-react';
-import { ReportView } from '@/components/ReportView';
+import { Plus, Send } from 'lucide-react';
+import { ReportView, type ReportMode } from '@/components/ReportView';
+
+type Mode = 'quick' | 'deep';
+type View = 'hero' | 'chat';
 
 interface ChatMsg {
   id: string;
   role: 'user' | 'ai' | 'system';
   report?: boolean;
+  mode?: Mode;
   content: string;
   time: number;
 }
 
-const MSG_KEY = 'req-decomposer:messages:v1';
-const SID_KEY = 'req-decomposer:session:v1';
+const MSG_KEY = 'req-decomposer:messages:v2';
+const SID_KEY = 'req-decomposer:session:v2';
+const MODE_KEY = 'req-decomposer:mode:v1';
+
+const SCENES = ['智能识别', '视频创作', '写作', '创业', '学习', '活动'];
+const SUGGESTIONS = ['我想做一个校园二手交易平台', '帮我拆解老人防走丢手环的创意', '做一款帮助考研人打卡的应用'];
+const NEXT_OPTIONS = [
+  'A. 帮我把第一步做出来',
+  'B. 帮我评估时间和成本',
+  'C. 我想调整一下方向',
+];
+const DEEP_NODES = ['场景识别', '需求解析', '深度解析', '优先级排序', '风险预判', '时间成本评估'];
+
+const GREETING =
+  '把你脑子里还不算清晰的想法告诉我。不够清楚我会追问几个关键问题，直到能替你拆出一份完整的方案与行动清单。';
 
 function load<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -24,36 +41,25 @@ function load<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-
 function makeId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 }
 
-const SUGGESTIONS = [
-  '我想做一个校园二手交易平台',
-  '帮我拆解老人防走丢手环的创意',
-  '做一款帮助考研人的打卡应用',
-];
-
-const GREETING = '你好，我是需求拆解师。把你脑子里任何还不算清晰的想法告诉我，我会先判断它够不够清楚——不够就追问你几个关键问题，直到能替你拆出一份包含方案与行动清单的完整报告。先从第一句话开始吧。';
-
-const NEXT_OPTIONS = [
-  'A. 帮我把第一步做出来',
-  'B. 帮我评估时间和成本',
-  'C. 我想调整一下方向',
-];
-
 export default function Home() {
+  const [view, setView] = useState<View>('hero');
+  const [mode, setMode] = useState<Mode>('quick');
+  const [scene, setScene] = useState('智能识别');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [sessionId, setSessionId] = useState<string>('');
+  const [sessionId, setSessionId] = useState('');
+  const [nodeIdx, setNodeIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nodeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 首次挂载：恢复会话
   useEffect(() => {
     const msgs = load<ChatMsg[]>(MSG_KEY, []);
     let sid = load<string>(SID_KEY, '');
@@ -66,207 +72,381 @@ export default function Home() {
     }
     setMessages(msgs);
     setSessionId(sid);
+    setMode(load<Mode>(MODE_KEY, 'quick'));
+    if (msgs.some((m) => m.role === 'user')) setView('chat');
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 持久化：消息与会话
   useEffect(() => {
     if (!hydrated) return;
     save(MSG_KEY, messages);
   }, [messages, hydrated]);
-
   useEffect(() => {
-    if (hydrated) save(SID_KEY, sessionId);
-  }, [sessionId, hydrated]);
+    if (hydrated) {
+      save(MODE_KEY, mode);
+      save(SID_KEY, sessionId);
+    }
+  }, [mode, sessionId, hydrated]);
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, []);
-
   useEffect(() => {
     if (hydrated) scrollToBottom();
   }, [messages, loading, hydrated, scrollToBottom]);
+
+  useEffect(() => {
+    if (loading && mode === 'deep') {
+      setNodeIdx(0);
+      nodeTimer.current = setInterval(() => {
+        setNodeIdx((i) => {
+          if (i >= DEEP_NODES.length) return i;
+          return i + 1;
+        });
+      }, 650);
+    } else if (nodeTimer.current) {
+      clearInterval(nodeTimer.current);
+      nodeTimer.current = null;
+    }
+    return () => {
+      if (nodeTimer.current) clearInterval(nodeTimer.current);
+    };
+  }, [loading, mode]);
 
   function save(key: string, value: unknown) {
     try {
       window.localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      /* 存储不可用时静默忽略 */
+      /* 忽略 */
     }
   }
 
   function startNew() {
     const sid = makeId();
     setSessionId(sid);
-    setMessages([
-      { id: makeId(), role: 'ai', content: GREETING, time: Date.now() },
-    ]);
+    setMessages([{ id: makeId(), role: 'ai', content: GREETING, time: Date.now() }]);
     setInput('');
-    save(SID_KEY, sid);
+    setView('hero');
   }
 
   async function handleSend(text?: string) {
     const value = (text ?? input).trim();
     if (!value || loading) return;
     setInput('');
+    if (view === 'hero') setView('chat');
 
-    const userMsg: ChatMsg = { id: makeId(), role: 'user', content: value, time: Date.now() };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { id: makeId(), role: 'user', content: value, time: Date.now() }]);
     setLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, message: value }),
+        body: JSON.stringify({ sessionId, message: value, mode, scene }),
       });
       const data = await res.json();
-
       if (!res.ok) {
-        const sys: ChatMsg = {
-          id: makeId(),
-          role: 'system',
-          content: `调用出错：${data.error || data.detail || '未知错误'}`,
-          time: Date.now(),
-        };
-        setMessages((prev) => [...prev, sys]);
+        setMessages((prev) => [
+          ...prev,
+          { id: makeId(), role: 'system', content: `调用出错：${data.detail || data.error || '未知错误'}`, time: Date.now() },
+        ]);
         return;
       }
-
-      const aiMsg: ChatMsg = {
-        id: makeId(),
-        role: 'ai',
-        report: data.type === 'solution',
-        content: data.content ?? '',
-        time: Date.now(),
-      };
-      setMessages((prev) => [...prev, aiMsg]);
+      const aiMode: Mode = data.mode === 'deep' ? 'deep' : 'quick';
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'ai',
+          report: data.type === 'solution',
+          mode: aiMode,
+          content: data.content ?? '',
+          time: Date.now(),
+        },
+      ]);
     } catch {
-      const sys: ChatMsg = {
-        id: makeId(),
-        role: 'system',
-        content: '网络异常，请稍后重试。',
-        time: Date.now(),
-      };
-      setMessages((prev) => [...prev, sys]);
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId(), role: 'system', content: '网络异常，请稍后重试。', time: Date.now() },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="chat-root flex h-dvh w-full flex-col bg-[#FAFAF8] text-[#1C2433]">
-      {/* 顶栏 */}
-      <header className="no-print z-10 flex shrink-0 items-center justify-between border-b border-[#ECEDF0] bg-[#FAFAF8]/90 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#1C2433] text-white">
-            <Bot className="h-5 w-5" />
-          </span>
-          <div className="leading-tight">
-            <h1 className="text-[15px] font-semibold tracking-tight">需求拆解师</h1>
-            <p className="text-[11px] text-[#8A91A0]">把模糊想法，拆成可执行的蓝图</p>
-          </div>
-        </div>
-        <button
-          onClick={startNew}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[#E2E6EC] bg-white px-3 py-1.5 text-[12px] font-medium text-[#3A4353] transition-colors hover:bg-[#F4F6F9]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          新需求
+    <div className="relative flex h-dvh flex-col overflow-hidden bg-white text-[#1d1d1f]">
+      <div
+        className="hero-glow"
+        style={{ top: '-200px', left: '50%', transform: 'translateX(-50%)' }}
+      />
+      {/* 顶部极简导航 */}
+      <nav className="app-nav glass no-print z-20 flex h-14 shrink-0 items-center justify-between border-b border-[#f0f0f2] px-5 sm:px-8">
+        <button onClick={startNew} className="text-[17px] font-semibold tracking-tight">
+          拆解
         </button>
-      </header>
+        <div className="flex items-center gap-3">
+          <ModeSwitch value={mode} onChange={setMode} />
+          <button
+            onClick={startNew}
+            className="inline-flex items-center gap-1 rounded-full bg-[#0071e3] px-3.5 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新需求
+          </button>
+        </div>
+      </nav>
 
-      {/* 会话区 */}
+      {view === 'hero' ? (
+        <HeroStage
+          mode={mode}
+          scene={scene}
+          onScene={setScene}
+          input={input}
+          onInput={setInput}
+          onSend={() => handleSend()}
+        />
+      ) : (
+        <ChatStage
+          mode={mode}
+          messages={messages}
+          loading={loading}
+          nodeIdx={nodeIdx}
+          scrollRef={scrollRef}
+          input={input}
+          onInput={setInput}
+          onSend={() => handleSend()}
+          onPick={handleSend}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ==================== 模式分段开关 ==================== */
+function ModeSwitch({ value, onChange }: { value: Mode; onChange: (m: Mode) => void }) {
+  return (
+    <div className="relative flex items-center rounded-full bg-[#f5f5f7] p-[3px]">
+      {(
+        [
+          { k: 'quick', label: '⚡ 快速' },
+          { k: 'deep', label: '🔬 深度' },
+        ] as const
+      ).map((it) => {
+        const active = value === it.k;
+        return (
+          <button
+            key={it.k}
+            onClick={() => onChange(it.k)}
+            className="relative z-10 rounded-full px-3.5 py-1 text-[12.5px] font-medium transition-[color,box-shadow] duration-300"
+            style={{
+              color: active ? '#1d1d1f' : '#86868b',
+              transform: active ? 'scale(1)' : 'none',
+            }}
+          >
+            {active && (
+              <span className="absolute inset-0 -z-10 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.12)]" />
+            )}
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ==================== 第一幕：首屏 ==================== */
+function HeroStage({
+  mode,
+  scene,
+  onScene,
+  input,
+  onInput,
+  onSend,
+}: {
+  mode: Mode;
+  scene: string;
+  onScene: (s: string) => void;
+  input: string;
+  onInput: (v: string) => void;
+  onSend: () => void;
+}) {
+  return (
+    <div className="fade-in relative z-10 flex flex-1 flex-col items-center justify-center px-6 text-center">
+      <h1 className="max-w-4xl text-[44px] font-bold leading-[1.08] tracking-tight text-[#1d1d1f] sm:text-[60px]">
+        把想法，拆到能执行。
+      </h1>
+      <p className="mt-5 text-[16px] text-[#86868b] sm:text-[18px]">一句话说清你的想法，剩下的交给我们。</p>
+
+      <div className="mt-10 w-full max-w-2xl">
+        {/* 场景胶囊 */}
+        <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+          {SCENES.map((s) => (
+            <button
+              key={s}
+              onClick={() => onScene(s)}
+              className={`rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
+                s === scene
+                  ? 'border-[#0071e3] text-[#0071e3] font-medium'
+                  : 'border-[#e8e8ed] bg-white text-[#86868b] hover:text-[#1d1d1f]'
+              }`}
+            >
+              {s === '智能识别' ? '智能识别 ✓' : s}
+            </button>
+          ))}
+        </div>
+
+        {/* 大输入框 */}
+        <div className="flex items-center gap-2 rounded-[16px] border border-[#d8d8dd] bg-white px-4 py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.06)] transition-shadow focus-within:border-[#0071e3] focus-within:ring-4 focus-within:ring-[#0071e3]/10">
+          <textarea
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+            rows={1}
+            placeholder="输入你的想法…"
+            className="max-h-28 flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
+          />
+          <button
+            onClick={onSend}
+            disabled={!input.trim()}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#0071e3] text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="开始拆解"
+          >
+            <Send className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+
+        <ModeTip mode={mode} />
+      </div>
+    </div>
+  );
+}
+
+function ModeTip({ mode }: { mode: Mode }) {
+  return (
+    <p className="mt-4 text-[13px] text-[#86868b]">
+      {mode === 'deep' ? '将启动专项分析节点 · 约 1 分钟' : '两次模型调用 · 秒级响应'}
+    </p>
+  );
+}
+
+/* ==================== 第二墓+第三幕：对话与报告 ==================== */
+function ChatStage({
+  mode,
+  messages,
+  loading,
+  nodeIdx,
+  scrollRef,
+  input,
+  onInput,
+  onSend,
+  onPick,
+}: {
+  mode: Mode;
+  messages: ChatMsg[];
+  loading: boolean;
+  nodeIdx: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  input: string;
+  onInput: (v: string) => void;
+  onSend: () => void;
+  onPick: (t: string) => void;
+}) {
+  const replying = loading && mode === 'deep';
+  return (
+    <>
+      {/* 消息流 */}
       <div
         ref={scrollRef}
         data-chat-scroll
-        className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 overflow-y-auto px-4 py-6 sm:px-6"
+        className="no-print mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 overflow-y-auto px-5 py-6 sm:px-6"
       >
-        {hydrated && messages.length === 0 && (
-          <EmptyState onPick={handleSend} />
+        {messages.map((m) => (
+          <MessageRow key={m.id} msg={m} onPick={onPick} />
+        ))}
+        {loading && (
+          <div className="scale-in">
+            {replying ? <DeepProgress nodeIdx={nodeIdx} /> : <TypingIndicator />}
+          </div>
         )}
-
-        {hydrated &&
-          messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} onPick={handleSend} />
-          ))}
-
-        {loading && <TypingIndicator />}
       </div>
 
-      {/* 输入区 */}
-      <div className="no-print shrink-0 border-t border-[#ECEDF0] bg-white/80 px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-3 backdrop-blur sm:px-6">
+      {/* 底部输入 */}
+      <div className="msg-input no-print z-20 shrink-0 border-t border-[#f0f0f2] px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-3 sm:px-6">
         <div className="mx-auto w-full max-w-3xl">
-          {hydrated && messages.length === 1 && (
+          {messages.length <= 1 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
-                  onClick={() => handleSend(s)}
-                  className="rounded-full border border-[#E2E6EC] bg-white px-3 py-1.5 text-[12px] text-[#4A5260] transition-colors hover:border-[#C7CDD8] hover:text-[#1C2433]"
+                  onClick={() => onPick(s)}
+                  className="rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] text-[#86868b] transition-colors hover:border-[#d8d8dd] hover:text-[#1d1d1f]"
                 >
                   {s}
                 </button>
               ))}
             </div>
           )}
-          <div className="flex items-end gap-2 rounded-2xl border border-[#E2E6EC] bg-white px-3 py-2 shadow-sm transition-shadow focus-within:border-[#8FA0D8] focus-within:ring-2 focus-within:ring-[#2E47A8]/10">
+          {mode === 'deep' && <ModeTip mode={mode} />}
+          <div className="flex items-end gap-2 rounded-full border border-[#d8d8dd] bg-white px-4 py-1 shadow-[0_4px_24px_rgba(0,0,0,0.04)] focus-within:border-[#0071e3]">
             <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => onInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend();
+                  onSend();
                 }
               }}
               rows={1}
-              placeholder="说出你的想法…（回车发送）"
-              className="max-h-32 flex-1 resize-none bg-transparent text-[14px] leading-6 text-[#1C2433] outline-none placeholder:text-[#B4BAC5]"
+              placeholder="继续输入…（回车发送）"
+              className="max-h-28 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
             />
             <button
-              onClick={() => handleSend()}
+              onClick={onSend}
               disabled={!input.trim() || loading}
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#1C2433] text-white transition-colors hover:bg-[#2E47A8] disabled:cursor-not-allowed disabled:opacity-30"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0071e3] text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="发送"
             >
               <Send className="h-4 w-4" />
             </button>
           </div>
-          <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-[#A8AEB8]">
-            <Settings2 className="h-3 w-3" />
-            判断与拆解由大模型（豆包）完成 · 会话自动保存
-          </p>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function MessageBubble({ msg, onPick }: { msg: ChatMsg; onPick?: (t: string) => void }) {
+function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void }) {
   if (msg.role === 'system') {
     return (
-      <div className="mx-auto flex max-w-[90%] items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[13px] leading-6 text-[#7A5A16]">
-        <AlertTriangle className="h-4 w-4 shrink-0" />
+      <div className="fade-in mx-auto flex max-w-[90%] items-center gap-2 rounded-[14px] bg-[#fff2f0] px-4 py-2.5 text-[13px] leading-6 text-[#e5484d]">
         <span>{msg.content}</span>
       </div>
     );
   }
 
   const isUser = msg.role === 'user';
+
+  // 第三幕：报告满屏展开
   if (msg.report) {
     return (
-      <div className="flex w-full justify-end gap-3">
-        <div className="w-full">
-          <ReportView content={msg.content} />
-          <div className="no-print mt-3 flex flex-wrap gap-2">
+      <div className="scale-in flex w-full justify-center">
+        <div className="w-full max-w-3xl">
+          <ReportView content={msg.content} mode={msg.mode} />
+          <div className="no-print mt-5 flex flex-wrap justify-center gap-2.5">
             {NEXT_OPTIONS.map((opt) => (
               <button
                 key={opt}
-                onClick={() => onPick?.(opt)}
-                className="rounded-full border border-[#E2E6EC] bg-white px-3 py-1.5 text-[12px] font-medium text-[#2E47A8] transition-colors hover:bg-[#2E47A8]/6"
+                onClick={() => onPick(opt)}
+                className="rounded-full px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
+                style={{ background: '#0071e3' }}
               >
                 {opt}
               </button>
@@ -278,46 +458,41 @@ function MessageBubble({ msg, onPick }: { msg: ChatMsg; onPick?: (t: string) => 
   }
 
   return (
-    <div className={`flex w-full items-end gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && (
-        <span className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#1C2433] text-white">
-          <Bot className="h-4 w-4" />
-        </span>
-      )}
-      <div
-        className={`max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-7 shadow-[0_1px_2px_rgba(28,36,51,0.06)] ${
-          isUser
-            ? 'rounded-br-md bg-[#E8ECF7] text-[#1C2433]'
-            : 'rounded-bl-md border border-[#ECEDF0] bg-white text-[#3A4353]'
-        }`}
-      >
-        {msg.content}
+    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={isUser ? 'max-w-[78%]' : 'flex max-w-[78%] flex-col items-start'}>
+        {!isUser && (
+          <div className="mb-1 text-[11px] font-medium text-[#86868b] no-print">
+            {msg.mode === 'deep' ? '🔬 深度' : '⚡ 快速'}
+          </div>
+        )}
+        <div
+          className={`whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[15px] leading-7 ${
+            isUser
+              ? 'rounded-br-sm bg-[#0071e3] text-white'
+              : 'rounded-bl-sm border border-[#f0f0f2] bg-[#f5f5f7] text-[#1d1d1f]'
+          }`}
+        >
+          {msg.content}
+        </div>
       </div>
     </div>
   );
 }
 
-function EmptyState({ onPick }: { onPick: (text: string) => void }) {
+function DeepProgress({ nodeIdx }: { nodeIdx: number }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center">
-      <div className="mb-5 grid h-16 w-16 place-items-center rounded-3xl bg-[#1C2433] text-white">
-        <Bot className="h-8 w-8" />
-      </div>
-      <h2 className="text-xl font-semibold tracking-tight text-[#1C2433]">
-        把想法说给我听
-      </h2>
-      <p className="mt-2 max-w-sm text-[13px] leading-6 text-[#5B6472]">
-        输入你的第一个想法，我会帮你把它拆成清晰的方案和行动清单。
-      </p>
-      <div className="mt-6 flex flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            onClick={() => onPick(s)}
-            className="rounded-full border border-[#E2E6EC] bg-white px-3.5 py-2 text-[12px] text-[#4A5260] transition-colors hover:border-[#C7CDD8] hover:text-[#1C2433]"
+    <div className="mx-auto max-w-md space-y-2 rounded-[16px] border border-[#f0f0f2] bg-[#fbfbfd] p-5">
+      <p className="text-[13px] font-medium text-[#1d1d1f]">正在启动专项分析节点…</p>
+      <div className="space-y-1.5">
+        {DEEP_NODES.slice(0, nodeIdx).map((n, i) => (
+          <div
+            key={n}
+            className="node-pop flex items-center gap-2 text-[13px]"
+            style={{ color: i === DEEP_NODES.length - 1 ? '#0071e3' : '#86868b' }}
           >
-            {s}
-          </button>
+            <span className="h-1.5 w-1.5 rounded-full bg-[#0071e3]" />
+            {n}
+          </div>
         ))}
       </div>
     </div>
@@ -326,17 +501,11 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
 
 function TypingIndicator() {
   return (
-    <div className="flex items-end gap-2.5">
-      <span className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#1C2433] text-white">
-        <Bot className="h-4 w-4" />
-      </span>
-      <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-[#ECEDF0] bg-white px-4 py-3">
-        <span className="flex items-center gap-1">
-          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
-          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
-          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
-        </span>
-        <span className="text-[12px] text-[#8A93A3]">正在拆解你的需求，长对话可能需要一点时间…</span>
+    <div className="flex w-full items-center gap-2.5">
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-[#f5f5f7] px-4 py-3">
+        <span className="dot h-1.5 w-1.5 rounded-full bg-[#86868b]" />
+        <span className="dot h-1.5 w-1.5 rounded-full bg-[#86868b]" />
+        <span className="dot h-1.5 w-1.5 rounded-full bg-[#86868b]" />
       </div>
     </div>
   );
