@@ -323,10 +323,13 @@ function TypingIndicator() {
       <span className="mb-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#1C2433] text-white">
         <Bot className="h-4 w-4" />
       </span>
-      <div className="flex items-center gap-1 rounded-2xl rounded-bl-md border border-[#ECEDF0] bg-white px-4 py-3">
-        <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
-        <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
-        <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
+      <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-[#ECEDF0] bg-white px-4 py-3">
+        <span className="flex items-center gap-1">
+          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
+          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
+          <span className="dot h-2 w-2 rounded-full bg-[#A8AEB8]" />
+        </span>
+        <span className="text-[12px] text-[#8A93A3]">正在拆解你的需求，长对话可能需要一点时间…</span>
       </div>
     </div>
   );
