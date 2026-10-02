@@ -7,8 +7,8 @@
  *  2. 自由文本 / Markdown（标题、列表、加粗、优先级标签、表格）
  * 统一输出精致的「工程蓝图」风格排版，并内联支持打印标记。
  */
-import { useMemo } from 'react';
-import { FileText, ListChecks, CircleDot, Printer } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { FileText, ListChecks, CircleDot, Printer, Copy, Check } from 'lucide-react';
 
 interface ActionRow {
   title?: string;
@@ -43,23 +43,23 @@ function parsePriority(text: string): { priority?: string; rest: string } {
 }
 
 const PRIORITY_META: Record<string, { label: string; tone: string }> = {
-  P0: { label: 'P0', tone: 'amber' },
-  P1: { label: 'P1', tone: 'blue' },
+  P0: { label: 'P0', tone: 'red' },
+  P1: { label: 'P1', tone: 'orange' },
   P2: { label: 'P2', tone: 'muted' },
   P3: { label: 'P3', tone: 'muted' },
-  紧急: { label: '紧急', tone: 'amber' },
-  高: { label: '高', tone: 'amber' },
-  中: { label: '中', tone: 'blue' },
+  紧急: { label: '紧急', tone: 'red' },
+  高: { label: '高', tone: 'red' },
+  中: { label: '中', tone: 'orange' },
   低: { label: '低', tone: 'muted' },
-  重要: { label: '重要', tone: 'amber' },
+  重要: { label: '重要', tone: 'red' },
 };
 
 function PriorityBadge({ priority }: { priority?: string }) {
   if (!priority) return null;
   const meta = PRIORITY_META[priority] ?? { label: priority, tone: 'muted' };
   const tones: Record<string, string> = {
-    amber: 'bg-amber-100 text-[#B97A25] ring-amber-200/70',
-    blue: 'bg-blue-50 text-[#2E47A8] ring-blue-200/70',
+    red: 'bg-red-50 text-[#B42318] ring-red-200/70',
+    orange: 'bg-orange-50 text-[#C2410C] ring-orange-200/70',
     muted: 'bg-neutral-100 text-[#5B6472] ring-neutral-200/70',
   };
   return (
@@ -91,6 +91,16 @@ function InlineText({ text }: { text: string }) {
 
 export function ReportView({ content }: { content: string }) {
   const model = useMemo<Model>(() => buildModel(content), [content]);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  };
 
   return (
     <div className="report-sheet relative w-full overflow-hidden rounded-2xl border border-[#E6E9EF] bg-[#FFFFFF] text-left shadow-[0_1px_2px_rgba(28,36,51,0.04),0_12px_32px_-18px_rgba(28,36,51,0.22)]">
@@ -98,18 +108,26 @@ export function ReportView({ content }: { content: string }) {
       <div className="gridline absolute inset-0 pointer-events-none" />
 
       {model.kind === 'json' ? (
-        <JsonReport model={model} />
+        <JsonReport model={model} onCopy={copy} copied={copied} />
       ) : (
-        <BlocksReport model={model} />
+        <BlocksReport model={model} onCopy={copy} copied={copied} />
       )}
     </div>
   );
 }
 
-function JsonReport({ model }: { model: Extract<Model, { kind: 'json' }> }) {
+function JsonReport({
+  model,
+  onCopy,
+  copied,
+}: {
+  model: Extract<Model, { kind: 'json' }>;
+  onCopy: () => void;
+  copied: boolean;
+}) {
   return (
     <div className="relative">
-      <ReportHeader title={model.title} summary={model.summary} />
+      <ReportHeader title={model.title} summary={model.summary} onCopy={onCopy} copied={copied} />
       <div className="px-6 pb-6 sm:px-8 sm:pb-8">
         {model.sections.map((s, i) => (
           <section key={i} className="mt-6">
@@ -135,7 +153,15 @@ function JsonReport({ model }: { model: Extract<Model, { kind: 'json' }> }) {
   );
 }
 
-function BlocksReport({ model }: { model: Extract<Model, { kind: 'blocks' }> }) {
+function BlocksReport({
+  model,
+  onCopy,
+  copied,
+}: {
+  model: Extract<Model, { kind: 'blocks' }>;
+  onCopy: () => void;
+  copied: boolean;
+}) {
   const { titleBlock, summaryText, sectionOrder } = useMemo(() => {
     const blocks = model.blocks;
     const titleBlock = blocks.find(
@@ -162,7 +188,12 @@ function BlocksReport({ model }: { model: Extract<Model, { kind: 'blocks' }> }) 
   return (
     <div className="relative">
       {titleBlock ? (
-        <ReportHeader title={titleBlock.text} summary={summaryText} />
+        <ReportHeader
+          title={titleBlock.text}
+          summary={summaryText}
+          onCopy={onCopy}
+          copied={copied}
+        />
       ) : null}
       <div className="px-6 pb-6 sm:px-8 sm:pb-8">
         {model.blocks.map((block, i) => {
@@ -220,7 +251,17 @@ function BlocksReport({ model }: { model: Extract<Model, { kind: 'blocks' }> }) 
   );
 }
 
-function ReportHeader({ title, summary }: { title: string; summary: string }) {
+function ReportHeader({
+  title,
+  summary,
+  onCopy,
+  copied,
+}: {
+  title: string;
+  summary: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
   return (
     <header className="relative border-b border-dashed border-[#DADEE6] px-6 pb-5 pt-6 sm:px-8">
       <div className="flex items-center justify-between">
@@ -232,6 +273,13 @@ function ReportHeader({ title, summary }: { title: string; summary: string }) {
             需求拆解报告
           </span>
         </div>
+        <button
+          className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#E2E6EC] bg-white px-2.5 py-1.5 text-[12px] font-medium text-[#3A4353] transition-colors hover:bg-[#F4F6F9]"
+          onClick={onCopy}
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-[#16A34A]" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? '已复制' : '复制'}
+        </button>
         <button
           className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#E2E6EC] bg-white px-2.5 py-1.5 text-[12px] font-medium text-[#3A4353] transition-colors hover:bg-[#F4F6F9]"
           onClick={() => window.print()}

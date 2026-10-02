@@ -39,6 +39,12 @@ const SUGGESTIONS = [
 
 const GREETING = '你好，我是需求拆解师。把你脑子里任何还不算清晰的想法告诉我，我会先判断它够不够清楚——不够就追问你几个关键问题，直到能替你拆出一份包含方案与行动清单的完整报告。先从第一句话开始吧。';
 
+const NEXT_OPTIONS = [
+  'A. 帮我把第一步做出来',
+  'B. 帮我评估时间和成本',
+  'C. 我想调整一下方向',
+];
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -119,22 +125,12 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        let sys: ChatMsg;
-        if (data.notConfigured) {
-          sys = {
-            id: makeId(),
-            role: 'system',
-            content: '尚未配置工作流。请在环境变量中设置 COZE_PAT，并在 src/lib/coze-config.ts 中填写 WORKFLOW_ID 与输入参数名，保存后刷新页面即可开始对话。',
-            time: Date.now(),
-          };
-        } else {
-          sys = {
-            id: makeId(),
-            role: 'system',
-            content: `调用出错：${data.error || '未知错误'}`,
-            time: Date.now(),
-          };
-        }
+        const sys: ChatMsg = {
+          id: makeId(),
+          role: 'system',
+          content: `调用出错：${data.error || data.detail || '未知错误'}`,
+          time: Date.now(),
+        };
         setMessages((prev) => [...prev, sys]);
         return;
       }
@@ -194,7 +190,7 @@ export default function Home() {
 
         {hydrated &&
           messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} />
+            <MessageBubble key={m.id} msg={m} onPick={handleSend} />
           ))}
 
         {loading && <TypingIndicator />}
@@ -241,7 +237,7 @@ export default function Home() {
           </div>
           <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-[#A8AEB8]">
             <Settings2 className="h-3 w-3" />
-            判断与拆解由扣子工作流完成 · 会话自动保存
+            判断与拆解由大模型（豆包）完成 · 会话自动保存
           </p>
         </div>
       </div>
@@ -249,7 +245,7 @@ export default function Home() {
   );
 }
 
-function MessageBubble({ msg }: { msg: ChatMsg }) {
+function MessageBubble({ msg, onPick }: { msg: ChatMsg; onPick?: (t: string) => void }) {
   if (msg.role === 'system') {
     return (
       <div className="mx-auto flex max-w-[90%] items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[13px] leading-6 text-[#7A5A16]">
@@ -265,6 +261,17 @@ function MessageBubble({ msg }: { msg: ChatMsg }) {
       <div className="flex w-full justify-end gap-3">
         <div className="w-full">
           <ReportView content={msg.content} />
+          <div className="no-print mt-3 flex flex-wrap gap-2">
+            {NEXT_OPTIONS.map((opt) => (
+              <button
+                key={opt}
+                onClick={() => onPick?.(opt)}
+                className="rounded-full border border-[#E2E6EC] bg-white px-3 py-1.5 text-[12px] font-medium text-[#2E47A8] transition-colors hover:bg-[#2E47A8]/6"
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );

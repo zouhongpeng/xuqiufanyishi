@@ -1,78 +1,82 @@
 import { NextResponse } from 'next/server';
 import {
-  appendTurn,
-  buildContext,
-  extractResult,
-  getTurns,
-  isNewTopicCommand,
-  resetSession,
-  runCozeWorkflow,
-} from '@/lib/coze';
+  buildContextInput,
+  decomposeReport,
+  isNewTopic,
+  judge,
+  type Judgement,
+} from '@/lib/decomposer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-interface ChatRequest {
-  sessionId?: string;
-  message?: string;
-}
+/** 内存会话表：sessionId -> 该会话的用户输入轮次（不含 AI 回复） */
+const sessions = new Map<string, string[]>();
 
-/**
- * POST /api/chat
- * body: { sessionId: string, message: string }
- *
- * 后端维护每个 session 的多轮上下文（第1轮/第2轮/…），拼接后调用扣子工作流。
- * 返回：
- *  - { type: 'question', clarity, content, round }  清晰度不够，等待用户继续回答
- *  - { type: 'solution', clarity, content, round }  清晰度足够，输出完整拆解报告
- *  - { error: 'COZE_NOT_CONFIGURED' }               尚未配置工作流（前端显示设置引导）
- */
 export async function POST(req: Request) {
-  let body: ChatRequest;
+  let body: { sessionId?: string; message?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: '请求体不是合法 JSON' }, { status: 400 });
   }
-
-  const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
-  const message = typeof body.message === 'string' ? body.message.trim() : '';
-
-  if (!sessionId) {
-    return NextResponse.json({ error: '缺少 sessionId' }, { status: 400 });
-  }
-  if (!message) {
-    return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
-  }
-
-  // 明确的换话题指令：历史清空，本次输入重新从第 1 轮开始
-  if (isNewTopicCommand(message)) {
-    resetSession(sessionId);
+  const { sessionId, message } = body ?? {};
+  if (
+    !sessionId ||
+    typeof sessionId !== 'string' ||
+    typeof message !== 'string' ||
+    !message.trim()
+  ) {
+    return NextResponse.json({ error: '缺少 sessionId 或 message' }, { status: 400 });
   }
 
-  const round = appendTurn(sessionId, message);
-  const turns = getTurns(sessionId);
-  const context = buildContext(turns);
+  const msg = message.trim();
+  let turns = sessions.get(sessionId) ?? [];
+  if (isNewTopic(msg)) turns = [];
+  turns.push(msg);
+  sessions.set(sessionId, turns);
+  const context = buildContextInput(turns);
 
-  const result = await runCozeWorkflow(context);
-  if (!result.ok) {
-    const status = result.notConfigured ? 503 : 502;
+  // 调用1：需求清晰度判断
+  let judgement: Judgement;
+  try {
+    judgement = await judge(context, req.headers);
+  } catch (e) {
     return NextResponse.json(
-      { error: result.error, notConfigured: result.notConfigured },
-      { status },
+      { error: '判断服务暂不可用', detail: (e as Error)?.message ?? String(e) },
+      { status: 502 },
     );
   }
 
-  const { clarity, question, solution } = extractResult(result.data);
+  // clarity ≤ 1：返回追问
+  if (judgement.clarity <= 1) {
+    return NextResponse.json({
+      type: 'question',
+      clarity: judgement.clarity,
+      category: judgement.category,
+      clarity_desc: judgement.clarity_desc,
+      content: judgement.next_question,
+      round: turns.length,
+    });
+  }
 
-  if (clarity <= 1) {
+  // clarity ≥ 2：调用2 生成完整拆解报告
+  let report: string;
+  try {
+    ({ report } = await decomposeReport(context, req.headers));
+  } catch (e) {
     return NextResponse.json(
-      { type: 'question', clarity, content: question, round },
-      { status: 200 },
+      { error: '拆解服务暂不可用', detail: (e as Error)?.message ?? String(e) },
+      { status: 502 },
     );
   }
-  return NextResponse.json(
-    { type: 'solution', clarity, content: solution, round },
-    { status: 200 },
-  );
+
+  return NextResponse.json({
+    type: 'solution',
+    clarity: judgement.clarity,
+    category: judgement.category,
+    clarity_desc: judgement.clarity_desc,
+    content: report,
+    round: turns.length,
+  });
 }
