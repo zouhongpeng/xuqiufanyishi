@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Send } from 'lucide-react';
 import { ReportView, type ReportMode } from '@/components/ReportView';
+import { DiagnosisCard, type DiagnosticOption } from '@/components/DiagnosisCard';
 
 type Mode = 'quick' | 'deep';
 type View = 'hero' | 'chat';
@@ -13,6 +14,11 @@ interface ChatMsg {
   report?: boolean;
   mode?: Mode;
   content: string;
+  clarity?: number;
+  category?: string;
+  clarity_desc?: string;
+  missing_info?: string[];
+  options?: DiagnosticOption[];
   time: number;
 }
 
@@ -20,7 +26,7 @@ const MSG_KEY = 'req-decomposer:messages:v2';
 const SID_KEY = 'req-decomposer:session:v2';
 const MODE_KEY = 'req-decomposer:mode:v1';
 
-const SCENES = ['智能识别', '视频创作', '写作', '创业', '学习', '活动'];
+const SCENES = ['科创赛诊断', '视频创作', '写作', '创业', '学习', '活动'];
 const SUGGESTIONS = ['我想做一个校园二手交易平台', '帮我拆解老人防走丢手环的创意', '做一款帮助考研人打卡的应用'];
 const NEXT_OPTIONS = [
   'A. 帮我把第一步做出来',
@@ -50,7 +56,7 @@ function makeId() {
 export default function Home() {
   const [view, setView] = useState<View>('hero');
   const [mode, setMode] = useState<Mode>('quick');
-  const [scene, setScene] = useState('智能识别');
+  const [scene, setScene] = useState('科创赛诊断');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -162,6 +168,11 @@ export default function Home() {
           report: data.type === 'solution',
           mode: aiMode,
           content: data.content ?? '',
+          clarity: data.clarity,
+          category: data.category,
+          clarity_desc: data.clarity_desc,
+          missing_info: data.missing_info,
+          options: data.options,
           time: Date.now(),
         },
       ]);
@@ -275,7 +286,7 @@ function HeroStage({
   return (
     <div className="fade-in relative z-10 flex flex-1 flex-col items-center justify-center px-6 text-center">
       <h1 className="max-w-4xl text-[44px] font-bold leading-[1.08] tracking-tight text-[#1d1d1f] sm:text-[60px]">
-        把想法，拆到能执行。
+        说出你的想法，我帮你拆到能执行。
       </h1>
       <p className="mt-5 text-[16px] text-[#86868b] sm:text-[18px]">一句话说清你的想法，剩下的交给我们。</p>
 
@@ -292,7 +303,7 @@ function HeroStage({
                   : 'border-[#e8e8ed] bg-white text-[#86868b] hover:text-[#1d1d1f]'
               }`}
             >
-              {s === '智能识别' ? '智能识别 ✓' : s}
+              {s}
             </button>
           ))}
         </div>
@@ -323,6 +334,7 @@ function HeroStage({
         </div>
 
         <ModeTip mode={mode} />
+        <p className="mt-2 text-[12px] text-[#c7c7cc]">专家知识库已就绪 · 支持深度推理</p>
       </div>
     </div>
   );
@@ -330,8 +342,8 @@ function HeroStage({
 
 function ModeTip({ mode }: { mode: Mode }) {
   return (
-    <p className="mt-4 text-[13px] text-[#86868b]">
-      {mode === 'deep' ? '将启动专项分析节点 · 约 1 分钟' : '两次模型调用 · 秒级响应'}
+    <p className="mt-3 text-[13px] text-[#86868b]">
+      {mode === 'deep' ? '将启动专项分析节点 · 约 1 分钟' : '快速拆解 · 即时反馈'}
     </p>
   );
 }
@@ -453,6 +465,23 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
             ))}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  // 追问诊断卡片：AI 回复携带缺失信息与可点选项时渲染
+  if (msg.role === 'ai' && !msg.report && msg.options && msg.options.length > 0) {
+    return (
+      <div className="flex w-full justify-start">
+        <DiagnosisCard
+          clarity={msg.clarity ?? 0}
+          category={msg.category ?? ''}
+          clarity_desc={msg.clarity_desc}
+          missing_info={msg.missing_info}
+          options={msg.options}
+          nextQuestion={msg.content}
+          onPick={onPick}
+        />
       </div>
     );
   }

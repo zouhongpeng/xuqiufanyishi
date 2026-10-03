@@ -41,8 +41,8 @@ export async function POST(req: Request) {
   sessions.set(sessionId, turns);
 
   let context = buildContextInput(turns);
-  // 用户手选场景（非“智能识别”）时，作为弱提示辅助场景归类，不放宽清晰度门槛
-  if (scene && scene !== DEFAULT_SCENE) {
+  // 深度模式工作流无法用 prompt 干预：把用户手选场景作为弱提示拼入上下文
+  if (mode === 'deep' && scene && scene !== DEFAULT_SCENE) {
     context += `\n（用户期望聚焦场景：${scene}）`;
   }
 
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
   // ============ 快速模式：LLM 两次调用 ============
   let judgement: Judgement;
   try {
-    judgement = await judge(context, req.headers);
+    judgement = await judge(context, req.headers, scene);
   } catch (e) {
     return NextResponse.json(
       { error: '判断服务暂不可用', detail: (e as Error)?.message ?? String(e) },
@@ -86,6 +86,8 @@ export async function POST(req: Request) {
       clarity: judgement.clarity,
       category: judgement.category,
       clarity_desc: judgement.clarity_desc,
+      missing_info: judgement.missing_info,
+      options: judgement.options,
       content: judgement.next_question,
       round: turns.length,
     });
@@ -93,7 +95,7 @@ export async function POST(req: Request) {
 
   let report: string;
   try {
-    ({ report } = await decomposeReport(context, req.headers));
+    ({ report } = await decomposeReport(context, req.headers, judgement.category));
   } catch (e) {
     return NextResponse.json(
       { error: '拆解服务暂不可用', detail: (e as Error)?.message ?? String(e) },
