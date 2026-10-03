@@ -10,9 +10,18 @@ import {
   Circle,
   CheckCircle2,
   TriangleAlert,
+  CircleAlert,
+  XCircle,
+  ShieldCheck,
 } from 'lucide-react';
 
 export type ReportMode = 'quick' | 'deep';
+
+export interface ReviewItem {
+  item: string;
+  status: 'pass' | 'warn' | 'fail';
+  note: string;
+}
 
 /* ---------- 解析：优先级标签（【高】/【P0】/高优先级…） ---------- */
 function parsePriority(text: string): { priority?: string; rest: string } {
@@ -175,7 +184,17 @@ function extractPriorityFromText(text: string): { priority?: string; rest: strin
 }
 
 /* ---------- 顶层 ---------- */
-export function ReportView({ content, mode }: { content: string; mode?: ReportMode }) {
+export function ReportView({
+  content,
+  mode,
+  checklist = [],
+  sourceTags = [],
+}: {
+  content: string;
+  mode?: ReportMode;
+  checklist?: ReviewItem[];
+  sourceTags?: string[];
+}) {
   const blocks = useMemo(() => parseMarkdown(content), [content]);
   const listKey = useMemo(() => `req-decomposer:check:${hash(content)}`, [content]);
   const [checks, setChecks] = useState<Record<string, boolean>>({});
@@ -212,8 +231,9 @@ export function ReportView({ content, mode }: { content: string; mode?: ReportMo
 
   return (
     <article className="report-sheet relative mx-auto w-full max-w-3xl rounded-[16px] bg-white text-left shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
-      <ReportHeader mode={mode} onCopy={copy} copied={copied} />
+      <ReportHeader mode={mode} onCopy={copy} copied={copied} sourceTags={sourceTags} />
       <Body blocks={blocks} checks={checks} onToggle={toggle} />
+      {checklist.length > 0 ? <ReviewChecklist items={checklist} /> : null}
     </article>
   );
 }
@@ -222,43 +242,61 @@ function ReportHeader({
   mode,
   onCopy,
   copied,
+  sourceTags = [],
 }: {
   mode?: ReportMode;
   onCopy: () => void;
   copied: boolean;
+  sourceTags?: string[];
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-[#f0f0f2] px-6 py-4 sm:px-10">
-      <div className="flex items-center gap-2 text-[13px] font-medium">
-        {mode === 'deep' || !mode ? (
-          <>
-            <Fingerprint className="h-4 w-4 text-[#0071e3]" />
-            <span className="text-[#1d1d1f]">深度拆解</span>
-            <span className="text-[#86868b]">· 已完成专项分析节点</span>
-          </>
-        ) : (
-          <>
-            <Zap className="h-4 w-4 text-[#0071e3]" />
-            <span className="text-[#1d1d1f]">快速拆解</span>
-          </>
-        )}
+    <div className="border-b border-[#f0f0f2] px-6 py-4 sm:px-10">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[13px] font-medium">
+          {mode === 'deep' || !mode ? (
+            <>
+              <Fingerprint className="h-4 w-4 text-[#0071e3]" />
+              <span className="text-[#1d1d1f]">深度论证</span>
+              <span className="text-[#86868b]">· 逐节点评审</span>
+            </>
+          ) : (
+            <>
+              <Zap className="h-4 w-4 text-[#0071e3]" />
+              <span className="text-[#1d1d1f]">快速预诊</span>
+            </>
+          )}
+        </div>
+        <div className="no-print flex items-center gap-2">
+          <button
+            onClick={onCopy}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7]"
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? '已复制' : '一键复制'}
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="no-print inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7]"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            打印
+          </button>
+        </div>
       </div>
-      <div className="no-print flex items-center gap-2">
-        <button
-          onClick={onCopy}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7]"
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? '已复制' : '一键复制'}
-        </button>
-        <button
-          onClick={() => window.print()}
-          className="no-print inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7]"
-        >
-          <Printer className="h-3.5 w-3.5" />
-          打印
-        </button>
-      </div>
+      {sourceTags.length > 0 ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <ShieldCheck className="h-3.5 w-3.5 text-[#86868b]" />
+          {sourceTags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full px-2 py-[2px] text-[11px] font-medium"
+              style={{ background: 'rgba(0,113,227,0.08)', color: '#0071e3' }}
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -439,5 +477,54 @@ function Body({
         );
       })}
     </div>
+  );
+}
+
+/* ---------- 评审检查清单（14 项核查表） ---------- */
+function statusIcon(status: ReviewItem['status']) {
+  if (status === 'pass') return { icon: CheckCircle2, color: '#2EA043', label: '通过' };
+  if (status === 'fail') return { icon: XCircle, color: '#E5484D', label: '不通过' };
+  return { icon: CircleAlert, color: '#E8A33D', label: '警示' };
+}
+
+function ReviewChecklist({ items }: { items: ReviewItem[] }) {
+  const pass = items.filter((i) => i.status === 'pass').length;
+  const iconFor = (s: ReviewItem['status']) => statusIcon(s).icon;
+  const colorFor = (s: ReviewItem['status']) => statusIcon(s).color;
+  return (
+    <section className="border-t border-[#f0f0f2] px-6 py-8 sm:px-10">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[22px] font-semibold tracking-tight text-[#1d1d1f]">
+          评审检查项 · <span className="text-[#0071e3]">{items.length}项专项检查</span>
+        </h2>
+        <div className="text-[12px] text-[#86868b]">
+          通过 {pass} · 警示 {items.filter((i) => i.status === 'warn').length} · 不通过{' '}
+          {items.filter((i) => i.status === 'fail').length}
+        </div>
+      </div>
+      <div className="mt-4 overflow-hidden rounded-[14px] border border-[#f0f0f2]">
+        {items.map((it, i) => {
+          const Icon = iconFor(it.status);
+          const color = colorFor(it.status);
+          return (
+            <div
+              key={`${it.item}-${i}`}
+              className={`flex items-start gap-3 px-5 py-3.5 ${i % 2 ? 'bg-[#fbfbfd]' : 'bg-white'}`}
+            >
+              <Icon className="mt-0.5 h-[18px] w-[18px] shrink-0" style={{ color }} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-semibold text-[#1d1d1f]">{it.item}</span>
+                  <span className="rounded-full px-2 py-[2px] text-[11px] font-medium" style={{ background: `${color}1f`, color }}>
+                    {statusIcon(it.status).label}
+                  </span>
+                </div>
+                {it.note ? <div className="mt-1 text-[13px] leading-6 text-[#86868b]">{it.note}</div> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

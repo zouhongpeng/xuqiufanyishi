@@ -1,0 +1,13 @@
+[
+  { "id": "Z01", "zone": "安全区", "item": "低代码平台搭建应用（如扣子 Coze）", "alternative": "-" },
+  { "id": "Z02", "zone": "安全区", "item": "调用现成大模型 API", "alternative": "-" },
+  { "id": "Z03", "zone": "安全区", "item": "微信小程序 / Web 应用开发", "alternative": "-" },
+  { "id": "Z04", "zone": "安全区", "item": "开源模型本地部署（如 Ollama）", "alternative": "-" },
+  { "id": "Z05", "zone": "安全区", "item": "公共公开数据集分析", "alternative": "-" },
+  { "id": "Z06", "zone": "安全区", "item": "现成传感器模块 + 开发板（Arduino/ESP32）", "alternative": "-" },
+  { "id": "Z07", "zone": "高风险区", "item": "自己训练大模型", "alternative": "改为调用现成 API 做垂直应用" },
+  { "id": "Z08", "zone": "高风险区", "item": "精密硬件自制", "alternative": "改用开发板 + 现成模块，或先做数字仿真" },
+  { "id": "Z09", "zone": "高风险区", "item": "需专业实验室的检测类项目", "alternative": "改为公开数据集分析" },
+  { "id": "Z10", "zone": "高风险区", "item": "涉及少儿/人脸等敏感数据的大规模采集", "alternative": "限定自采样小样本 + 明确授权与脱敏" },
+  { "id": "Z11", "zone": "高风险区", "item": "物理侵入性/有安全隐患的硬件", "alternative": "改为仿真或非接触式方案" }
+]

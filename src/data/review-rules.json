@@ -1,0 +1,12 @@
+[
+  { "id": "R01", "rule_type": "评委红线", "rule_name": "三自原则", "rule_content": "项目须由学生自己选题、自己设计研究、自己撰写，严禁家长或机构代劳。", "severity": "违规直接淘汰" },
+  { "id": "R02", "rule_type": "评分权重", "rule_name": "创新性", "rule_content": "新颖度与原创性处于评分最大权重，同类项目需给出差异化创新点。", "severity": "权重最高" },
+  { "id": "R03", "rule_type": "评分权重", "rule_name": "科学性", "rule_content": "技术路线、数据真实性、实验方法要经得起推敲，证据链条完整。", "severity": "权重次高" },
+  { "id": "R04", "rule_type": "评分权重", "rule_name": "实用性", "rule_content": "三性原则之一，要求解决真实问题，有明确的应用场景与价值。", "severity": "权重中" },
+  { "id": "R05", "rule_type": "常见扣分项", "rule_name": "答辩讲不出实现细节", "rule_content": "评委追问技术实现、数据来源、代码结构时无法作答，疑似代劳。", "severity": "扣分" },
+  { "id": "R06", "rule_type": "常见扣分项", "rule_name": "工作量超出中学生可行范围", "rule_content": "需专业实验室、私有硬件、自训练大模型等中学生不可独立完成的环节。", "severity": "扣分" },
+  { "id": "R07", "rule_type": "常见扣分项", "rule_name": "创新点站不住", "rule_content": "所谓创新点只是现有成熟方案的换皮，评委一问即发现无实质差异。", "severity": "扣分" },
+  { "id": "R08", "rule_type": "常见扣分项", "rule_name": "数据真实性存疑", "rule_content": "实验数据来源不明、无法复现、与论文/答辩表述不一致。", "severity": "扣分" },
+  { "id": "R09", "rule_type": "常见扣分项", "rule_name": "与往届获奖项目高度撞车", "rule_content": "选题在往届获奖/红海列表中高度相似，缺乏差异化角度。", "severity": "扣分并降竞争力" },
+  { "id": "R10", "rule_type": "加分项", "rule_name": "展示逻辑清晰", "rule_content": "答辩陈述能从需求痛点→方案→验证→价值四段式讲清楚。", "severity": "加分" }
+]

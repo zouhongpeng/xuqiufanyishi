@@ -28,6 +28,10 @@ export const DEEP_CONFIG = {
   /** 扣子工作流 API 地址（国内版） */
   apiBase: process.env.COZE_API_BASE || 'https://api.coze.cn/v1/workflow/run',
 
+  /** 扣子工作流流式接口 */
+  streamRunUrl:
+    process.env.COZE_STREAM_BASE || 'https://api.coze.cn/v1/workflow/stream_run',
+
   /** 深度模式使用的工作流 ID（放配置文件；可用环境变量 WORKFLOW_ID 覆盖） */
   workflowId:
     process.env.WORKFLOW_ID || '7691974364770648064',

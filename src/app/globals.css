@@ -164,6 +164,35 @@ body {
   animation: node-pop 0.35s ease-out both;
 }
 
+/* 评审过程：呼吸点 + 打字光标（只动 opacity/transform） */
+@keyframes review-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+.review-pulse {
+  animation: review-pulse 1.4s ease-in-out infinite;
+}
+@keyframes review-caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.review-caret {
+  animation: review-caret-blink 0.8s steps(1) infinite;
+}
+
 /* 打印：仅输出报告 */
 @media print {
   body {
