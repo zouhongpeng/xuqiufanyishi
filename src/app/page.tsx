@@ -532,17 +532,18 @@ function KbFooter() {
           <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
         {open && (
-          <div className="fade-in relative mt-1 grid gap-2 rounded-[16px] border border-[#f0f0f2] bg-[#fbfbfd] p-4 pr-14 text-left">
+          <>
             <button
               onClick={() => setOpen(false)}
               aria-label="收起雷区警示榜"
-              className="absolute right-2.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-[#ececf0] bg-white text-[#86868b] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-all hover:scale-105 hover:text-[#1d1d1f]"
+              className="no-print fixed right-6 top-6 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[#ececf0] bg-white text-[#86868b] shadow-[0_4px_24px_rgba(0,0,0,0.12)] transition-all hover:scale-105 hover:text-[#1d1d1f]"
             >
               <X className="h-5 w-5" />
             </button>
-            <p className="text-[12px] text-[#86868b]">
-              以下方向在往届科创赛中已高度饱和，直接做容易撞车，需要差异化。
-            </p>
+            <div className="fade-in mt-1 grid gap-2 rounded-[16px] border border-[#f0f0f2] bg-[#fbfbfd] p-4 text-left">
+              <p className="text-[12px] text-[#86868b]">
+                以下方向在往届科创赛中已高度饱和，直接做容易撞车，需要差异化。
+              </p>
             {RED_SEA_CASES.map((c) => (
               <div
                 key={c.id}
@@ -559,7 +560,8 @@ function KbFooter() {
                 </p>
               </div>
             ))}
-          </div>
+            </div>
+            </>
         )}
       </div>
     </div>
