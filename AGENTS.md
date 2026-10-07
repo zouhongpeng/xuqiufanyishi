@@ -104,6 +104,7 @@
 
 - **自定义服务端不自动加载 .env.local**：`src/server.ts` 走 `next({dev})` 编程 API，不是 `next dev` CLI，Next 不会自动读 `.env.local`；server.ts 启动时已手动解析 `.env.local`/`.env` 注入 `process.env`（不覆盖已有变量）。新增环境变量直接写 `.env.local` 即可，但**改 server.ts 或环境文件后必须重启 dev**。
 - **深度论证失败**：多为 `COZE_PAT` 未配置、账户欠费或工作流较慢；流式路径自动降级（定时赛事动画 + 非流式 `deepRun` 兜底），最终通过 `error` 事件让前端显示报错气泡。
+- **部署环境无 COZE_PAT（重要）**：部署走 git 传输（`[deploy].deps=["git"]`），`.env.local` 被 gitignore 不随部署带走 → 线上 `dist/server.js` 读不到令牌。已做产品级降级：无令牌时深度模式自动回退 LLM 引擎（judge + decomposeReport，`deepViaLLM`），评审环节动画照常播放，结果携带 `notice` 字段提示「本次由快速预诊引擎完成」，前端渲染为灰色说明条。若要在部署实例启用真工作流，需在平台部署环境变量中配置 `COZE_PAT`（严禁把令牌写进任何 git 追踪的文件）。预览环境（next dev）读 `.env.local`，不受影响。
 - **LLM 账户欠费**：`judge/decomposeReport/streamReport` 抛「[临时不可用] 余额已欠费」→ `/api/chat` 返回 502 带 detail，流式路径发 `error` 事件；属外部依赖，前端正常显示错误，不白屏。
 - **深度流式节点匹配**：`REVIEW_STAGES` 以 keyword 模式匹配真实工作流节点名，未匹配归「扩展检查项」；映射可后续按真实节点校正（用户保留校正权）。
 - **判断解析失败**：`extractJson` 剥围栏/首个 `{}`/重试，仍失败则报错不崩溃。

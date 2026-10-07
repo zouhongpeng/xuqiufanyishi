@@ -21,6 +21,9 @@ const sessions = new Map<string, string[]>();
 
 const DEFAULT_SCENE = '智能识别';
 
+const DEEP_FALLBACK_NOTICE =
+  '未检测到工作流访问令牌（COZE_PAT），本次评审由快速预诊引擎完成；在部署环境配置 COZE_PAT 后即可启用深度论证工作流。';
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Ctl = ReadableStreamDefaultController<Uint8Array>;
@@ -106,7 +109,7 @@ export async function POST(req: Request) {
         mode === 'deep' && scene && scene !== DEFAULT_SCENE ? scene : undefined;
       try {
         if (mode === 'deep') {
-          await streamDeep(sink, context, effectiveScene);
+          await streamDeep(sink, context, req.headers, effectiveScene);
         } else {
           await streamQuick(sink, context, req.headers, scene);
         }
@@ -185,7 +188,7 @@ function turnsLen(context: string): number {
 }
 
 /* ---------------- 深度模式：流式 ---------------- */
-async function streamDeep(sink: Sink, context: string, scene?: string) {
+async function streamDeep(sink: Sink, context: string, headers: Headers, scene?: string) {
   sink.send('phase', {
     id: 'deep',
     label: '深度论证进行中',
@@ -210,8 +213,18 @@ async function streamDeep(sink: Sink, context: string, scene?: string) {
     if (gotResult) return;
     throw new Error('流式未返回最终结果');
   } catch {
-    // 降级：定时动画 + 非流式 deepRun 保证结果
+    // 降级：照常播放评审环节动画；无工作流令牌时退回 LLM 引擎，否则 deepRun
     const timerP = animateFallback(sink);
+    if (!process.env.COZE_PAT) {
+      try {
+        const r = await deepViaLLM(context, headers, scene);
+        await timerP;
+        wPublish(sink, 'deep', r, context, DEEP_FALLBACK_NOTICE);
+        return;
+      } catch (e) {
+        throw new Error(`深度模式暂不可用：${(e as Error)?.message ?? String(e)}`);
+      }
+    }
     let r;
     try {
       r = await deepRun(context);
@@ -223,11 +236,40 @@ async function streamDeep(sink: Sink, context: string, scene?: string) {
   }
 }
 
+interface DeepLLMResult {
+  clarity: number;
+  category: string;
+  content: string;
+  checklist?: unknown[];
+  source_tags?: string[];
+}
+
+/** 无 COZE_PAT 时的深度模式兜底：judge + decomposeReport（SDK 平台凭证，无需令牌） */
+async function deepViaLLM(
+  context: string,
+  headers: Headers,
+  scene?: string,
+): Promise<DeepLLMResult> {
+  const j = await judge(context, headers, scene);
+  if (j.clarity <= 1) {
+    return { clarity: j.clarity, category: j.category, content: j.next_question };
+  }
+  const rep = await decomposeReport(context, headers, j.category);
+  return {
+    clarity: j.clarity,
+    category: j.category,
+    content: rep.report,
+    checklist: rep.checklist,
+    source_tags: rep.source_tags,
+  };
+}
+
 function wPublish(
   sink: Sink,
   mode: 'deep',
-  r: { clarity: number; category: string; content: string },
+  r: DeepLLMResult,
   context: string,
+  notice?: string,
 ) {
   const type = r.clarity <= 1 ? 'question' : 'solution';
   sink.send('result', {
@@ -239,6 +281,9 @@ function wPublish(
       clarity_desc: '',
       content: r.content,
       round: turnsLen(context),
+      checklist: r.checklist ?? [],
+      source_tags: r.source_tags ?? [],
+      ...(notice ? { notice } : {}),
     },
   });
 }
@@ -269,6 +314,25 @@ async function runNonStream(
 ) {
   // 深度模式
   if (mode === 'deep') {
+    if (!process.env.COZE_PAT) {
+      try {
+        const r = await deepViaLLM(context, headers, scene);
+        return json(200, {
+          type: r.clarity <= 1 ? 'question' : 'solution',
+          mode,
+          clarity: r.clarity,
+          category: r.category,
+          clarity_desc: '',
+          content: r.content,
+          round,
+          checklist: r.checklist ?? [],
+          source_tags: r.source_tags ?? [],
+          notice: DEEP_FALLBACK_NOTICE,
+        });
+      } catch (e) {
+        return json(502, { error: '深度模式暂不可用', detail: (e as Error)?.message ?? String(e) });
+      }
+    }
     try {
       const r = await deepRun(context);
       return json(200, {
