@@ -17,6 +17,19 @@ export const LLM_CONFIG = {
 
   /** JSON 解析失败后的重试次数（除首次外的补充次数） */
   retries: 2,
+
+  /**
+   * DeepSeek 直连配置（可选）：配置 DEEPSEEK_API_KEY 后，快速预诊与 LLM 拆解
+   * 优先走 DeepSeek 官方 API（用户自有额度）；未配置时回退 coze-coding-dev-sdk。
+   * 密钥只放 .env.local / 部署环境变量，严禁写入代码或本配置文件。
+   */
+  deepseek: {
+    baseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, ''),
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    judgeModel: process.env.DEEPSEEK_MODEL_JUDGE || 'deepseek-flash',
+    reportModel: process.env.DEEPSEEK_MODEL_REPORT || 'deepseek-v4-pro',
+    timeoutMs: 180_000,
+  },
 } as const;
 
 /**

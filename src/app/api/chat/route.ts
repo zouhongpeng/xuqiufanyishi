@@ -3,7 +3,7 @@ import {
   decomposeReport,
   isNewTopic,
   judge,
-  splitReviewOutput,
+  reviewChecklist,
   streamReport,
   type Judgement,
 } from '@/lib/decomposer';
@@ -143,27 +143,14 @@ async function streamQuick(sink: Sink, context: string, headers: Headers, scene?
   sink.send('phase', { id: 'report', label: '深度拆解中：生成整改方案' });
 
   let report = '';
-  let full = '';
   for await (const item of streamReport(context, headers, judgement.category)) {
     if (typeof item === 'string') {
       report += item;
       sink.send('token', { text: item });
-    } else {
-      full = item.full;
     }
   }
 
-  let checklist: unknown[] = [];
-  let source_tags: string[] = [];
-  if (full) {
-    const parsed = splitReviewOutput(full);
-    checklist = parsed.checklist;
-    source_tags = parsed.source_tags;
-  } else {
-    const r = await decomposeReport(context, headers, judgement.category);
-    checklist = r.checklist;
-    source_tags = r.source_tags;
-  }
+  const rv = await reviewChecklist(context, report, headers);
   if (!report) report = '（未能生成报告内容）';
 
   sink.send('phase', { id: 'report', done: true });
@@ -176,8 +163,8 @@ async function streamQuick(sink: Sink, context: string, headers: Headers, scene?
       clarity_desc: judgement.clarity_desc,
       content: report,
       round: turnsLen(context),
-      checklist,
-      source_tags,
+      checklist: rv.checklist,
+      source_tags: rv.source_tags,
     },
   });
 }

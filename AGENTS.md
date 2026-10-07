@@ -12,7 +12,7 @@
 - **Core**: React 19，TypeScript 5
 - **UI/Styling**: Tailwind CSS 4 + 手写 Apple 风格（白底 #FFFFFF、文字 #1D1D1F、唯一强调色 #0071E3；见 `DESIGN.md`）
 - **包管理器**: `pnpm`（严禁 npm/yarn）
-- **LLM 接入**: `coze-coding-dev-sdk` 的 LLM 能力调**豆包**（快速预诊；支持 `client.stream` 流式）
+- **LLM 接入**: `src/lib/llmProvider.ts` 供应商抽象——配置 `DEEPSEEK_API_KEY` 时**直连 DeepSeek 官方 API**（OpenAI 兼容 `{DEEPSEEK_BASE_URL||https://api.deepseek.com}/chat/completions`，Bearer 认证，SSE 流式；该端点支持的模型名为 `deepseek-flash`/`deepseek-v4-pro`，`resolveModel` 把豆包语义模型名 judgeModel/reportModel 映射过去），用用户自有额度；未配置时回退 `coze-coding-dev-sdk` 调豆包（`client.invoke`/`client.stream`）
 - **工作流接入**: 扣子 `POST /v1/workflow/run`（非流式）与 `/v1/workflow/stream_run`（流式事件）（深度论证）
 
 ## 科创赛知识库（`src/data/*.json` + `src/lib/knowledge.ts`）
@@ -24,12 +24,13 @@
 
 ## 双模式引擎（核心）
 
-### 快速预诊（`src/lib/decomposer.ts`，纯 LLM）
+### 快速预诊（`src/lib/decomposer.ts`，纯 LLM；底层经 `src/lib/llmProvider.ts`）
 - `judge(context, headers, scene?)`：调用1「清晰度判断」。`JUDGE_SYSTEM` 为**评委视角**（严格、不恭维、「太宽泛，需要聚焦」）；scene/category 命中「科创赛诊断」时追加 `SCIENCE_FAIR_EXPERT`（三自原则/三性原则）**并注入 `SCIENCE_FAIR_CONTEXT()` 知识库 + 红海关键字检测职责**（命中在 `missing_info` 标注「该方向已高度饱和，需差异化」）。JSON：`{clarity(0-3从严), category, clarity_desc, missing_info[], next_question, options[{label,hint}], source_tags[]}`。模型 `MODEL_JUDGE`。
-- `decomposeReport(context, headers, category?)`：调用2「完整拆解」，输出 Markdown 报告；**科创赛场景同样注入知识库**；返回 `{report, checklist(14项), source_tags}`。模型 `MODEL_REPORT`。
-- `streamReport(context, headers, category?)`：`LLMClient.stream()` 逐 token 返回报告正文，末尾 item 携带完整串（`{kind:'__final', full}`）。
-- `splitReviewOutput(full)`：从报告全文拆分出 `checklist` / `source_tags`（报告内嵌 `---CHECKLIST_JSON---` 分隔块）。
-- `checklist` 14 项固定：自主选题核查/创新性论证/科学性校验/查重比对/能力边界校验/工作量规划/技术路线核查/时间线合理性/资源匹配/风险预案/差异化空间/展示逻辑/答辩风险/迭代空间；每项 `{item,status:'pass'|'warn'|'fail',note}`。
+- `decomposeReport(context, headers, category?)`：调用2「完整拆解」，**报告正文纯 Markdown 流式输出（DECOMPOSE_SYSTEM 明令不输出 JSON/分隔块）**；checklist 由独立的第三次调用生成（见 `reviewChecklist`）；返回 `{report, checklist(14项), source_tags}`。模型 `MODEL_REPORT`。
+- `streamReport(context, headers, category?)`：`chatStream()` 逐 token yield 报告正文，末尾 item 携带完整串（`{kind:'__final', full}`）；route.ts 只消费 string 分支（`__final` 已废弃使用）。
+- `reviewChecklist(context, report, headers)`：**checklist 独立廉价调用**——`CHECKLIST_SYSTEM` 要求输出严格 JSON `{checklist:[{item,status,note}],source_tags:[...]}`（judgeModel、temperature 0.2，2 次尝试 + `extractJson` 解析，`checklist.length>=10` 才接受）；失败/缺项由 `padChecklist` 兜底补齐 14 项（缺失项 `{status:'warn', note:'未生成评估，请人工复核'}`）。
+  - **架构决策（重要）**：旧方案「报告正文末尾内嵌 `---REVIEW_JSON---` 分隔块再拆分」已废弃——报告模型输出契约不稳定，模型经常漏输出 JSON 块导致 checklist 为空；现拆为独立调用，报告流式不被污染。`splitReviewOutput` 已删除，route.ts 不得再引用。
+- `checklist` 14 项固定（`CHECKLIST_ITEMS`）：自主选题核查/创新性论证/科学性校验/查重比对/能力边界校验/工作量规划/技术路线核查/时间线合理性/资源匹配/风险预案/差异化空间/展示逻辑/答辩风险/迭代空间；每项 `{item,status:'pass'|'warn'|'fail',note}`。
 - `buildContextInput()` 拼「第1轮:[..]第2轮:[..]」；`isNewTopic()` 命中触发词清空历史。
 
 ### 深度论证（`src/lib/workflow.ts` + `workflowStream.ts`，扣子工作流）
@@ -51,9 +52,10 @@
 │   ├── components/ReportView.tsx    # 苹果页式报告（行动看板 checkbox 本地持久、风险红区、14 项评审检查清单、依据标签）
 │   ├── data/                # 科创赛知识库三表 JSON
 │   ├── lib/
-│   │   ├── config.ts        # LLM_CONFIG + DEEP_CONFIG
+│   │   ├── config.ts        # LLM_CONFIG（含 deepseek 段）+ DEEP_CONFIG
+│   │   ├── llmProvider.ts   # LLM 供应商抽象（DeepSeek 直连优先 / coze SDK 回退；chatText/chatStream/resolveModel）
 │   │   ├── knowledge.ts     # 知识库压缩注入 + 红海命中检测
-│   │   ├── decomposer.ts    # 快速预诊 LLM 引擎（judge/decomposeReport/streamReport/splitReviewOutput）
+│   │   ├── decomposer.ts    # 快速预诊 LLM 引擎（judge/decomposeReport/streamReport/reviewChecklist）
 │   │   ├── workflow.ts      # 深度模式非流式调用
 │   │   └── workflowStream.ts# 深度模式流式事件 + REVIEW_STAGES/FALLBACK_STAGES + 节点映射
 │   └── server.ts            # Next 自定义 HTTP 入口（读 PORT，默认 5000）
@@ -86,6 +88,7 @@
 ## 配置
 
 - **认证**：`coze-coding-dev-sdk` 的 `Config()` 自动从 Coze Coding 运行环境注入；深度论证需 `COZE_PAT`（扣子开放平台令牌）放环境变量（`.env.local`，git 忽略）。**严禁在代码/配置文件写死密钥。**
+- **DeepSeek 直连（快速预诊主路径）**：`DEEPSEEK_API_KEY` 放 `.env.local`（git 忽略）；可选 `DEEPSEEK_BASE_URL`（默认 `https://api.deepseek.com`）。配置后 `llmProvider` 全部 LLM 调用（judge/report/checklist）直连 DeepSeek 官方 API，消耗用户自有额度；模型名为 `deepseek-flash`（判断/检查清单）与 `deepseek-v4-pro`（报告），由 `resolveModel` 从豆包语义模型名映射（`MODEL_JUDGE`/`MODEL_REPORT` 环境变量仍可覆盖）。
 - **WORKFLOW_ID**：`src/lib/config.ts` 的 `DEEP_CONFIG.workflowId`（可用环境变量 `WORKFLOW_ID` 覆盖）。
 - 可选模型覆盖：`MODEL_JUDGE` / `MODEL_REPORT`。
 
@@ -105,11 +108,12 @@
 - **自定义服务端不自动加载 .env.local**：`src/server.ts` 走 `next({dev})` 编程 API，不是 `next dev` CLI，Next 不会自动读 `.env.local`；server.ts 启动时已手动解析 `.env.local`/`.env` 注入 `process.env`（不覆盖已有变量）。新增环境变量直接写 `.env.local` 即可，但**改 server.ts 或环境文件后必须重启 dev**。
 - **深度论证失败**：多为 `COZE_PAT` 未配置、账户欠费或工作流较慢；流式路径自动降级（定时赛事动画 + 非流式 `deepRun` 兜底），最终通过 `error` 事件让前端显示报错气泡。
 - **部署环境无 COZE_PAT（重要）**：部署走 git 传输（`[deploy].deps=["git"]`），`.env.local` 被 gitignore 不随部署带走 → 线上 `dist/server.js` 读不到令牌。已做产品级降级：无令牌时深度模式自动回退 LLM 引擎（judge + decomposeReport，`deepViaLLM`），评审环节动画照常播放，结果携带 `notice` 字段提示「本次由快速预诊引擎完成」，前端渲染为灰色说明条。若要在部署实例启用真工作流，需在平台部署环境变量中配置 `COZE_PAT`（严禁把令牌写进任何 git 追踪的文件）。预览环境（next dev）读 `.env.local`，不受影响。
-- **LLM 账户欠费**：`judge/decomposeReport/streamReport` 抛「[临时不可用] 余额已欠费」→ `/api/chat` 返回 502 带 detail，流式路径发 `error` 事件；属外部依赖，前端正常显示错误，不白屏。
+- **部署环境无 DEEPSEEK_API_KEY（同理）**：`.env.local` 同样不随 git 部署带走 → 线上 `llmProvider` 回退 coze SDK 调豆包。要在部署实例用 DeepSeek 额度，需在平台部署环境变量中配置 `DEEPSEEK_API_KEY`（严禁写进 git 追踪文件）。
+- **LLM 账户欠费**：豆包 SDK 路径抛「[临时不可用] 余额已欠费」；DeepSeek 路径抛 `DeepSeek API <status>: <detail>`（非 2xx）→ `/api/chat` 返回 502 带 detail，流式路径发 `error` 事件；属外部依赖，前端正常显示错误，不白屏。
 - **深度流式节点匹配**：`REVIEW_STAGES` 以 keyword 模式匹配真实工作流节点名，未匹配归「扩展检查项」；映射可后续按真实节点校正（用户保留校正权）。
 - **判断解析失败**：`extractJson` 剥围栏/首个 `{}`/重试，仍失败则报错不崩溃。
 - **换话题误清空**：仅整段匹配触发词（长度 ≤14）才清空。
-- **报告渲染**：优先 Markdown 标题/列表/行动清单（解析成任务卡：优先级标签【高】红/#FF6B6B、【中】橙/#FFA94D、【低】灰/#ADB5BD + 预计耗时 + 验收标准 + 依赖项 + checkbox），无法解析按纯文本兜底；`---CHECKLIST_JSON---` 分隔块被引擎截取为 `checklist/source_tags`。
+- **报告渲染**：优先 Markdown 标题/列表/行动清单（解析成任务卡：优先级标签【高】红/#FF6B6B、【中】橙/#FFA94D、【低】灰/#ADB5BD + 预计耗时 + 验收标准 + 依赖项 + checkbox），无法解析按纯文本兜底；checklist/source_tags 由独立 `reviewChecklist` 调用生成（不再依赖报告内嵌 JSON，`padChecklist` 兜底补齐 14 项）。
 - **诊断卡片**：`judge` 返回的 `options`/`missing_info` 解析失败时给空数组 + 默认选项兜底，不崩溃。
 - **边界**：前端不重复实现 AI 逻辑，判断/拆解只由引擎（LLM/工作流）负责。
 - **Hydration**：聊天页 `'use client'`，localStorage 读取在 `useEffect` 且先置 `hydrated`；`window.print`/`navigator.clipboard` 仅在用户交互时调用。

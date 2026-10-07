@@ -1,5 +1,5 @@
-import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { LLM_CONFIG } from './config';
+import { chatStream, chatText } from './llmProvider';
 import { buildKBContext, redSeaHitOnText } from './knowledge';
 
 /**
@@ -85,11 +85,9 @@ A. 帮我把第一步做出来
 B. 帮我评估时间和成本
 C. 我想调整一下方向
 
-要求 ：根据场景用对应领域的专业知识拆解（科创赛要懂三自/三性原则与能力边界；抖音要懂流量、选题、发布节奏；学习要懂方法论），全文无emoji。
+要求 ：根据场景用对应领域的专业知识拆解（科创赛要懂三自/三性原则与能力边界；抖音要懂流量、选题、发布节奏；学习要懂方法论），全文无emoji。直接输出报告正文，不要输出任何 JSON 或代码块。`.trimStart();
 
-在你的 Markdown 报告正文之后，另起一行输出固定分隔行：
----REVIEW_JSON---
-然后紧接输出一个 JSON 对象（不要其他任何文字，注意字符串别含换行）：
+const CHECKLIST_SYSTEM = `你是科创项目评审记录员。根据给定的用户需求上下文与拆解报告，逐项评估以下 14 个检查项，输出严格 JSON，不要任何其他文字：
 {
   "checklist": [
     {"item":"自主选题核查","status":"pass|warn|fail","note":"一句话说明"},
@@ -107,12 +105,9 @@ C. 我想调整一下方向
     {"item":"答辩风险","status":"pass|warn|fail","note":"一句话说明"},
     {"item":"迭代空间","status":"pass|warn|fail","note":"一句话说明"}
   ],
-  "source_tags": ["规则·三自原则", "查重·往届案例", "边界·高风险区"]
+  "source_tags": ["实际命中的依据标签，只取自：规则·三自原则 / 规则·三性原则 / 查重·往届案例 / 边界·高风险区"]
 }
-其中的判断要引用依据来源标签（source_tags 只取实际命中的：规则三自/三性·、查重·往届案例、边界·高风险区）。
-checklist 的 14 个 item 必须与上面顺序一一对应，不得增删。`.trimStart();
-
-const DELIMITER = '---REVIEW_JSON---';
+要求：checklist 的 14 个 item 必须与上述顺序完全一致、不得增删；status 只能取 pass/warn/fail；note 为一句话中文说明，fail/warn 项必须指出具体问题。`.trimStart();
 
 interface ChecklistItem {
   item: string;
@@ -236,22 +231,6 @@ function parseSourceTags(v: unknown): string[] {
     .slice(0, 8);
 }
 
-/** 把「报告正文 + 分隔行 + JSON」拆成人能读的报告与结构化数据 */
-export function splitReviewOutput(full: string): { report: string; checklist: ChecklistItem[]; source_tags: string[] } {
-  const idx = full.indexOf(DELIMITER);
-  if (idx < 0) {
-    return { report: full.trim(), checklist: [], source_tags: [] };
-  }
-  const report = full.slice(0, idx).trim();
-  const jtext = full.slice(idx + DELIMITER.length).trim();
-  const parsed = extractJson(jtext);
-  return {
-    report,
-    checklist: parsed ? parseChecklist(parsed.checklist) : [],
-    source_tags: parsed ? parseSourceTags(parsed.source_tags) : [],
-  };
-}
-
 function buildExpertBlock(scene?: string, category?: string): string {
   if (!isScienceFair(scene, category)) return '';
   return `\n${SCIENCE_FAIR_EXPERT}\n${buildKBContext(scene, category)}`;
@@ -262,30 +241,9 @@ async function llmInvoke(
   user: string,
   model: string,
   temperature: number,
-  forwardingHeaders: Record<string, string> | undefined,
+  headers?: Headers,
 ): Promise<string> {
-  const client = new LLMClient(new Config(), forwardingHeaders);
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= LLM_CONFIG.retries; attempt++) {
-    try {
-      const resp = await client.invoke(
-        [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        {
-          model,
-          temperature,
-          thinking: 'disabled',
-          caching: 'disabled',
-        },
-      );
-      return resp.content;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError;
+  return chatText(system, user, { model, temperature, headers, timeoutMs: LLM_CONFIG.timeoutMs });
 }
 
 /** 调用1：需求清晰度判断（每轮都执行；scene 为前端预选场景弱提示） */
@@ -301,7 +259,7 @@ export async function judge(
     `以下是根据多轮对话整理的用户需求上下文：\n${context}${sceneHint}\n\n请判断需求清晰度。`,
     LLM_CONFIG.judgeModel,
     0.2,
-    HeaderUtils.extractForwardHeaders(headers),
+    headers,
   );
   const parsed = extractJson(built);
   if (!parsed) {
@@ -339,20 +297,58 @@ export async function decomposeReport(
   category?: string,
 ): Promise<DecomposeResult> {
   const expert = buildExpertBlock(undefined, category);
-  const full = await llmInvoke(
+  const report = await llmInvoke(
     DECOMPOSE_SYSTEM + expert,
     `请根据以下对话历史中的用户需求生成拆解报告：\n${context}`,
     LLM_CONFIG.reportModel,
     0.7,
-    HeaderUtils.extractForwardHeaders(headers),
+    headers,
   );
-  const { report, checklist, source_tags } = splitReviewOutput(full);
-  return { report, category: category || '其他', checklist, source_tags };
+  const rv = await reviewChecklist(context, report, headers);
+  return { report, category: category || '其他', checklist: rv.checklist, source_tags: rv.source_tags };
 }
 
 /**
- * 流式版本：逐 token 输出拆解报告正文，最后 yield 一个 `{ kind:'__final', full }`
- * 控制对象携带完整原文（含 ---REVIEW_JSON--- 后的 JSON），供路由解析检查清单。
+ * 独立的检查清单生成：以报告全文为输入做一次廉价 JSON 调用，
+ * 不再依赖报告模型「正文后附 JSON」的格式自觉。解析失败时回退 14 项待复核默认值。
+ */
+export async function reviewChecklist(
+  context: string,
+  report: string,
+  headers: Headers,
+): Promise<{ checklist: ChecklistItem[]; source_tags: string[] }> {
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      const built = await chatText(
+        CHECKLIST_SYSTEM,
+        `【用户需求上下文】\n${context}\n\n【拆解报告全文】\n${report}`,
+        { model: LLM_CONFIG.judgeModel, temperature: 0.2, headers, timeoutMs: LLM_CONFIG.timeoutMs },
+      );
+      const parsed = extractJson(built);
+      if (parsed) {
+        const checklist = parseChecklist(parsed.checklist);
+        const source_tags = parseSourceTags(parsed.source_tags);
+        if (checklist.length >= 10) {
+          return { checklist: padChecklist(checklist), source_tags };
+        }
+      }
+    } catch {
+      /* 重试或兜底 */
+    }
+  }
+  return { checklist: padChecklist([]), source_tags: [] };
+}
+
+/** 补齐缺失项，保证前端核查表恒为 14 行 */
+function padChecklist(checklist: ChecklistItem[]): ChecklistItem[] {
+  const byItem = new Map(checklist.map((c) => [c.item, c]));
+  return CHECKLIST_ITEMS.map(
+    (item) => byItem.get(item) ?? { item, status: 'warn' as const, note: '未生成评估，请人工复核' },
+  );
+}
+
+/**
+ * 流式版本：逐 token 输出完整拆解报告正文，末尾以 `{ kind:'__final', full }` 交付全文。
  */
 export async function* streamReport(
   context: string,
@@ -360,30 +356,14 @@ export async function* streamReport(
   category?: string,
 ): AsyncGenerator<string | { kind: '__final'; full: string }> {
   const expert = buildExpertBlock(undefined, category);
-  const client = new LLMClient(
-    new Config(),
-    HeaderUtils.extractForwardHeaders(headers),
-  );
-  const messages = [
-    { role: 'system' as const, content: DECOMPOSE_SYSTEM + expert },
-    { role: 'user' as const, content: `请根据以下对话历史中的用户需求生成拆解报告：\n${context}` },
-  ];
   let acc = '';
-  let delivered = 0;
-  for await (const chunk of client.stream(
-    messages,
-    { model: LLM_CONFIG.reportModel, temperature: 0.7, thinking: 'disabled', caching: 'disabled' },
+  for await (const chunk of chatStream(
+    DECOMPOSE_SYSTEM + expert,
+    `请根据以下对话历史中的用户需求生成拆解报告：\n${context}`,
+    { model: LLM_CONFIG.reportModel, temperature: 0.7, headers, timeoutMs: LLM_CONFIG.deepseek.timeoutMs },
   )) {
-    const text = chunk.content ? chunk.content.toString() : '';
-    if (!text) continue;
-    acc += text;
-    const idx = acc.indexOf(DELIMITER);
-    const boundary = idx >= 0 ? idx : acc.length;
-    if (boundary > delivered) {
-      yield acc.slice(delivered, boundary);
-      delivered = boundary;
-    }
-    if (idx >= 0) break;
+    acc += chunk;
+    yield chunk;
   }
   yield { kind: '__final' as const, full: acc };
 }
