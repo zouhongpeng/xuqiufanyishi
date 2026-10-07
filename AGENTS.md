@@ -104,6 +104,8 @@
 
 - **自定义服务端不自动加载 .env.local**：`src/server.ts` 走 `next({dev})` 编程 API，不是 `next dev` CLI，Next 不会自动读 `.env.local`；server.ts 启动时已手动解析 `.env.local`/`.env` 注入 `process.env`（不覆盖已有变量）。新增环境变量直接写 `.env.local` 即可，但**改 server.ts 或环境文件后必须重启 dev**。
 - **深度论证失败**：多为 `COZE_PAT` 未配置、账户欠费或工作流较慢；流式路径自动降级（定时赛事动画 + 非流式 `deepRun` 兜底），最终通过 `error` 事件让前端显示报错气泡。
+- **线上部署没有 COZE_PAT（设计使然）**：部署按 git 提交构建，`.env.local` 被 git 忽略不会进入部署环境；平台只自动注入官方 SDK 凭证（快速预诊线上可用），个人工作流令牌必须由用户在部署环境变量里配置，否则线上深度模式报「未配置 COZE_PAT」。预览环境不受影响。
+- **stream_run 空转挂起**：扣子流式接口可能长时间不吐数据（排队/挂起），`workflowStream.ts` 已加 25s 空闲超时（`armIdle`），超时即 abort 走降级，全局超时仍为 `DEEP_CONFIG.timeoutMs`。
 - **LLM 账户欠费**：`judge/decomposeReport/streamReport` 抛「[临时不可用] 余额已欠费」→ `/api/chat` 返回 502 带 detail，流式路径发 `error` 事件；属外部依赖，前端正常显示错误，不白屏。
 - **深度流式节点匹配**：`REVIEW_STAGES` 以 keyword 模式匹配真实工作流节点名，未匹配归「扩展检查项」；映射可后续按真实节点校正（用户保留校正权）。
 - **判断解析失败**：`extractJson` 剥围栏/首个 `{}`/重试，仍失败则报错不崩溃。

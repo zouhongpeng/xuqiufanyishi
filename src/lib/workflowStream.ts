@@ -67,7 +67,15 @@ export async function* streamDeepWorkflow(
   }
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), DEEP_CONFIG.timeoutMs);
+  const globalTimer = setTimeout(() => ctrl.abort(), DEEP_CONFIG.timeoutMs);
+  // 空闲超时：stream_run 长时间不吐任何数据（排队/挂起）时尽快中止，走降级而非干等
+  const IDLE_MS = 25_000;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const armIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => ctrl.abort(), IDLE_MS);
+  };
+  armIdle();
   let rawAll = '';
   let lastActiveIdx = -1;
   const stageDone = new Array(REVIEW_STAGES.length).fill(false);
@@ -126,6 +134,7 @@ export async function* streamDeepWorkflow(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      armIdle();
       buffer += decoder.decode(value, { stream: true });
       rawAll = buffer;
 
@@ -178,7 +187,8 @@ export async function* streamDeepWorkflow(
     }
     throw new Error('流式未取到可解析的最终结果');
   } finally {
-    clearTimeout(timer);
+    clearTimeout(globalTimer);
+    if (idleTimer) clearTimeout(idleTimer);
   }
 }
 
