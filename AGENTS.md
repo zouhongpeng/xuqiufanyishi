@@ -102,6 +102,7 @@
 
 ## 常见问题和预防
 
+- **自定义服务端不自动加载 .env.local**：`src/server.ts` 走 `next({dev})` 编程 API，不是 `next dev` CLI，Next 不会自动读 `.env.local`；server.ts 启动时已手动解析 `.env.local`/`.env` 注入 `process.env`（不覆盖已有变量）。新增环境变量直接写 `.env.local` 即可，但**改 server.ts 或环境文件后必须重启 dev**。
 - **深度论证失败**：多为 `COZE_PAT` 未配置、账户欠费或工作流较慢；流式路径自动降级（定时赛事动画 + 非流式 `deepRun` 兜底），最终通过 `error` 事件让前端显示报错气泡。
 - **LLM 账户欠费**：`judge/decomposeReport/streamReport` 抛「[临时不可用] 余额已欠费」→ `/api/chat` 返回 502 带 detail，流式路径发 `error` 事件；属外部依赖，前端正常显示错误，不白屏。
 - **深度流式节点匹配**：`REVIEW_STAGES` 以 keyword 模式匹配真实工作流节点名，未匹配归「扩展检查项」；映射可后续按真实节点校正（用户保留校正权）。
