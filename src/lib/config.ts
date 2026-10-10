@@ -19,15 +19,19 @@ export const LLM_CONFIG = {
   retries: 2,
 
   /**
-   * DeepSeek 直连配置（可选）：配置 DEEPSEEK_API_KEY 后，快速预诊与 LLM 拆解
-   * 优先走 DeepSeek 官方 API（用户自有额度）；未配置时回退 coze-coding-dev-sdk。
+   * DeepSeek 直连配置（可选）：配置 DEEPSEEK_API_KEY 后，快速预诊与深度论证链
+   * 优先直连 DeepSeek API（用户自有额度）；未配置时回退 coze-coding-dev-sdk。
    * 密钥只放 .env.local / 部署环境变量，严禁写入代码或本配置文件。
    */
   deepseek: {
     baseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, ''),
     apiKey: process.env.DEEPSEEK_API_KEY || '',
-    judgeModel: process.env.DEEPSEEK_MODEL_JUDGE || 'deepseek-flash',
-    reportModel: process.env.DEEPSEEK_MODEL_REPORT || 'deepseek-v4-pro',
+    /** 快速模式两次调用 / 报告整合 / 检查清单 */
+    chatModel: process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat',
+    /** 深度论证多视角与评委质询（reasoning_content 为思维链） */
+    reasoningModel: process.env.DEEPSEEK_REASONING_MODEL || 'deepseek-reasoner',
+    /** 单次推理模型尝试的超时：超时或失败 → 降级 chat 模型 + 逐步推理提示 */
+    reasoningTimeoutMs: 60_000,
     timeoutMs: 180_000,
   },
 } as const;

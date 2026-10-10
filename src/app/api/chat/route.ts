@@ -1,7 +1,5 @@
 import {
-  buildContextInput,
   decomposeReport,
-  isNewTopic,
   judge,
   reviewChecklist,
   streamReport,
@@ -12,12 +10,12 @@ import {
   streamDeepWorkflow,
   FALLBACK_STAGES,
 } from '@/lib/workflowStream';
+import { appendTurn } from '@/lib/sessionStore';
+import { checkRate, clientIp, RATE_RULES } from '@/lib/rateLimit';
+import { runDeepChain } from '@/lib/deepChain';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-/** 内存会话表：sessionId -> 该会话的用户输入轮次（不含 AI 回复） */
-const sessions = new Map<string, string[]>();
 
 const DEFAULT_SCENE = '智能识别';
 
@@ -85,12 +83,18 @@ export async function POST(req: Request) {
 
   const mode = rawMode === 'deep' ? 'deep' : 'quick';
   const msg = message.trim();
-  let turns = sessions.get(sessionId) ?? [];
-  if (isNewTopic(msg)) turns = [];
-  turns.push(msg);
-  sessions.set(sessionId, turns);
 
-  const context = buildContextInput(turns);
+  const rateRule = checkRate(`${mode}:${clientIp(req)}`, RATE_RULES[mode]);
+  if (rateRule) {
+    return json(429, {
+      error:
+        mode === 'deep'
+          ? `深度论证请求过于频繁（${rateRule.label}），请稍后再试`
+          : `请求过于频繁（${rateRule.label}），请稍后再试`,
+    });
+  }
+
+  const { context, turns } = appendTurn(sessionId, msg);
 
   if (!stream) {
     return runNonStream(context, req.headers, mode, scene, turns.length);
@@ -109,9 +113,9 @@ export async function POST(req: Request) {
         mode === 'deep' && scene && scene !== DEFAULT_SCENE ? scene : undefined;
       try {
         if (mode === 'deep') {
-          await streamDeep(sink, context, req.headers, effectiveScene);
+          await streamDeep(sink, context, req.headers, effectiveScene, turns.length);
         } else {
-          await streamQuick(sink, context, req.headers, scene);
+          await streamQuick(sink, context, req.headers, scene, turns.length);
         }
         sink.end();
       } catch (e) {
@@ -124,7 +128,7 @@ export async function POST(req: Request) {
 }
 
 /* ---------------- 快速模式：流式 ---------------- */
-async function streamQuick(sink: Sink, context: string, headers: Headers, scene?: string) {
+async function streamQuick(sink: Sink, context: string, headers: Headers, scene?: string, round = 1) {
   sink.send('phase', { id: 'judge', label: '快速预诊中：清晰度评估' });
   let judgement: Judgement;
   try {
@@ -135,7 +139,7 @@ async function streamQuick(sink: Sink, context: string, headers: Headers, scene?
 
   if (judgement.clarity <= 1) {
     sink.send('phase', { id: 'judge', done: true });
-    sink.send('result', { result: questionPayload(judgement, turnsLen(context)) });
+    sink.send('result', { result: questionPayload(judgement, round) });
     return;
   }
 
@@ -143,7 +147,7 @@ async function streamQuick(sink: Sink, context: string, headers: Headers, scene?
   sink.send('phase', { id: 'report', label: '深度拆解中：生成整改方案' });
 
   let report = '';
-  for await (const item of streamReport(context, headers, judgement.category)) {
+  for await (const item of streamReport(context, headers, judgement.category, scene)) {
     if (typeof item === 'string') {
       report += item;
       sink.send('token', { text: item });
@@ -162,25 +166,38 @@ async function streamQuick(sink: Sink, context: string, headers: Headers, scene?
       category: judgement.category,
       clarity_desc: judgement.clarity_desc,
       content: report,
-      round: turnsLen(context),
+      round,
       checklist: rv.checklist,
       source_tags: rv.source_tags,
     },
   });
 }
 
-function turnsLen(context: string): number {
-  const m = context.match(/第\d+轮/g);
-  return m ? m.length : 1;
-}
+/* ---------------- 深度模式：五阶段论证链（DeepSeek）→ 降级扣子工作流 ---------------- */
+async function streamDeep(
+  sink: Sink,
+  context: string,
+  headers: Headers,
+  scene: string | undefined,
+  round: number,
+) {
+  try {
+    await runDeepChain(
+      context,
+      headers,
+      scene,
+      (ev) => sink.send(ev.type, ev as unknown as Record<string, unknown>),
+      round,
+    );
+    return;
+  } catch (chainErr) {
+    console.log(
+      `[deep-chain] 五阶段链失败，降级扣子工作流：${(chainErr as Error)?.message ?? String(chainErr)}`,
+    );
+  }
 
-/* ---------------- 深度模式：流式 ---------------- */
-async function streamDeep(sink: Sink, context: string, headers: Headers, scene?: string) {
-  sink.send('phase', {
-    id: 'deep',
-    label: '深度论证进行中',
-    desc: scene ? `（聚焦场景：${scene}）` : '',
-  });
+  // 降级：照常播放评审环节动画；无工作流令牌时退回 LLM 引擎，否则 deepRun
+  sink.send('phase_reset');
   let gotResult = false;
   try {
     for await (const ev of streamDeepWorkflow(context)) {
@@ -193,20 +210,18 @@ async function streamDeep(sink: Sink, context: string, headers: Headers, scene?:
         });
       } else {
         gotResult = true;
-        const r = ev.result;
-        wPublish(sink, 'deep', r, context);
+        wPublish(sink, 'deep', ev.result, context, round);
       }
     }
     if (gotResult) return;
     throw new Error('流式未返回最终结果');
   } catch {
-    // 降级：照常播放评审环节动画；无工作流令牌时退回 LLM 引擎，否则 deepRun
     const timerP = animateFallback(sink);
     if (!process.env.COZE_PAT) {
       try {
         const r = await deepViaLLM(context, headers, scene);
         await timerP;
-        wPublish(sink, 'deep', r, context, DEEP_FALLBACK_NOTICE);
+        wPublish(sink, 'deep', r, context, round, DEEP_FALLBACK_NOTICE);
         return;
       } catch (e) {
         throw new Error(`深度模式暂不可用：${(e as Error)?.message ?? String(e)}`);
@@ -219,7 +234,7 @@ async function streamDeep(sink: Sink, context: string, headers: Headers, scene?:
       throw new Error(`深度模式暂不可用：${(e as Error)?.message ?? String(e)}`);
     }
     await timerP;
-    wPublish(sink, 'deep', r, context);
+    wPublish(sink, 'deep', r, context, round);
   }
 }
 
@@ -228,7 +243,9 @@ interface DeepLLMResult {
   category: string;
   content: string;
   checklist?: unknown[];
-  source_tags?: string[];
+  source_tags?: unknown[];
+  plagiarism?: unknown;
+  evidence?: unknown;
 }
 
 /** 无 COZE_PAT 时的深度模式兜底：judge + decomposeReport（SDK 平台凭证，无需令牌） */
@@ -241,13 +258,15 @@ async function deepViaLLM(
   if (j.clarity <= 1) {
     return { clarity: j.clarity, category: j.category, content: j.next_question };
   }
-  const rep = await decomposeReport(context, headers, j.category);
+  const rep = await decomposeReport(context, headers, j.category, scene);
   return {
     clarity: j.clarity,
     category: j.category,
     content: rep.report,
     checklist: rep.checklist,
     source_tags: rep.source_tags,
+    plagiarism: rep.plagiarism,
+    evidence: rep.evidence,
   };
 }
 
@@ -256,6 +275,7 @@ function wPublish(
   mode: 'deep',
   r: DeepLLMResult,
   context: string,
+  round: number,
   notice?: string,
 ) {
   const type = r.clarity <= 1 ? 'question' : 'solution';
@@ -267,9 +287,11 @@ function wPublish(
       category: r.category,
       clarity_desc: '',
       content: r.content,
-      round: turnsLen(context),
+      round,
       checklist: r.checklist ?? [],
       source_tags: r.source_tags ?? [],
+      plagiarism: r.plagiarism,
+      evidence: r.evidence,
       ...(notice ? { notice } : {}),
     },
   });
@@ -349,7 +371,7 @@ async function runNonStream(
     return json(200, questionPayload(judgement, round));
   }
   try {
-    const r = await decomposeReport(context, headers, judgement.category);
+    const r = await decomposeReport(context, headers, judgement.category, scene);
     return json(200, {
       type: 'solution',
       mode: 'quick',

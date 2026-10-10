@@ -12,15 +12,28 @@ import {
   CheckCircle2,
   CircleAlert,
   X,
+  Brain,
+  History,
 } from 'lucide-react';
-import { ReportView, type ReviewItem } from '@/components/ReportView';
+import { ReportView, type ReviewItem, type PlagiarismHint, type EvidenceRef } from '@/components/ReportView';
 import { DiagnosisCard, type DiagnosticOption } from '@/components/DiagnosisCard';
-import pastCasesData from '@/data/past-cases.json';
-import reviewRulesData from '@/data/review-rules.json';
-import boundaryData from '@/data/capability-boundary.json';
+import KnowledgeDrawer from '@/components/KnowledgeDrawer';
+import HistoryDrawer from '@/components/HistoryDrawer';
+import Toast from '@/components/Toast';
+import { addHistory } from '@/lib/history';
+import kbCasesData from '@/data/knowledge/cases.json';
+import kbRulesData from '@/data/knowledge/rules.json';
+import kbBoundariesData from '@/data/knowledge/boundaries.json';
 
 type Mode = 'quick' | 'deep';
 type View = 'hero' | 'chat';
+
+interface ThinkingView {
+  view: string;
+  viewName: string;
+  text: string;
+  done: boolean;
+}
 
 interface ChatMsg {
   id: string;
@@ -35,7 +48,13 @@ interface ChatMsg {
   options?: DiagnosticOption[];
   checklist?: ReviewItem[];
   source_tags?: string[];
+  plagiarism?: PlagiarismHint | null;
+  evidence?: EvidenceRef[];
   notice?: string;
+  phases?: RStage[];
+  thinking?: ThinkingView[];
+  thinkingMeta?: { chars: number; sec: number };
+  scene?: string;
   time: number;
 }
 
@@ -43,13 +62,14 @@ interface RStage {
   label: string;
   desc: string;
   status: 'pending' | 'active' | 'done';
+  elapsedMs?: number;
 }
 
 const MSG_KEY = 'req-decomposer:messages:v3';
 const SID_KEY = 'req-decomposer:session:v2';
 const MODE_KEY = 'req-decomposer:mode:v1';
 
-const SCENES = ['科创赛诊断', '视频创作', '写作', '创业', '学习', '活动'];
+const SCENES = ['科创赛诊断', '社团策划', '学习规划', '内容创作'];
 const SUGGESTIONS = ['我想做一个校园二手交易平台', '帮我拆解老人防走丢手环的创意', '做一款帮助考研人打卡的应用'];
 const NEXT_LABEL = '下一步，你可以：';
 const NEXT_OPTIONS = [
@@ -58,7 +78,16 @@ const NEXT_OPTIONS = [
   'C. 我想调整一下方向',
 ];
 
-/** 深度论证：评审环节（与后端 REVIEW_STAGES 一致的默认环节） */
+/** 深度论证：五阶段（与后端 DEEP_PHASES 一致） */
+const DEEP_PHASES_UI: { label: string; desc: string }[] = [
+  { label: '需求诊断', desc: '评估清晰度、识别场景、列出缺失关键信息' },
+  { label: '多视角论证', desc: '创新性 / 科学性与可行性 / 应用价值与红海风险 三路并行' },
+  { label: '评委质询', desc: '评委视角质询能力边界、工作量真实性与答辩风险' },
+  { label: '报告整合', desc: '整合诊断、论证与质询，生成结构化报告' },
+  { label: '检查清单', desc: '生成 14 项评审检查清单' },
+];
+
+/** 深度论证降级：评审环节（与后端 REVIEW_STAGES 一致的默认环节） */
 const REVIEW_DEFAULT_STAGES: { label: string; desc: string }[] = [
   { label: '立项材料审查', desc: '核对需求完整性与自主性' },
   { label: '场景识别', desc: '判定领域与评审口径' },
@@ -71,20 +100,37 @@ const REVIEW_DEFAULT_STAGES: { label: string; desc: string }[] = [
   { label: '报告整合', desc: '汇编评审结论' },
 ];
 
-const PAST_CASES = pastCasesData as {
+interface KbCase {
   id: string;
-  project_name: string;
-  core_tech: string;
-  award_level: string;
-  innovation_tags: string;
-  sea_status: string;
-  differentiation_hint: string;
-}[];
-const RULE_COUNT = reviewRulesData.length;
-const BOUNDARY_COUNT = boundaryData.length;
-const RED_SEA_CASES = PAST_CASES.filter(
-  (c) => c.sea_status === '红海' || c.sea_status === '中等',
-);
+  name: string;
+  domain: string;
+  result: string;
+  seaStatus: string;
+  redSea: string;
+  differentiation: string;
+  keywords?: string[];
+  note?: string;
+}
+interface KbRule {
+  id: string;
+  dimension: string;
+  content: string;
+  weight: string;
+  deduction: string;
+  keywords?: string[];
+}
+interface KbBoundary {
+  id: string;
+  item: string;
+  safe: boolean;
+  risk: string;
+  fallback: string;
+  keywords?: string[];
+}
+const KB_CASES = kbCasesData as KbCase[];
+const KB_RULES = kbRulesData as KbRule[];
+const KB_BOUNDARIES = kbBoundariesData as KbBoundary[];
+const RED_SEA_CASES = KB_CASES.filter((c) => c.seaStatus === '红海' || c.seaStatus === '拥挤');
 
 const GREETING =
   '把你想参加科创赛的想法告诉我。我会像评委一样审视它：先查清晰度，不够就追问几个关键问题，直到能为你出具一份含整改行动方案与评审检查清单的完整诊断报告。';
@@ -121,10 +167,19 @@ export default function Home() {
   const [streamText, setStreamText] = useState('');
   const [finished, setFinished] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
+  // 深度思考摘录（reasoning_delta 实时拼接）
+  const [thinking, setThinking] = useState<ThinkingView[]>([]);
+  const [thinkingDone, setThinkingDone] = useState(false);
+  const [thinkingSec, setThinkingSec] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamAccRef = useRef('');
   const finishedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const thinkingRef = useRef<ThinkingView[]>([]);
+  const stagesRef = useRef<RStage[]>([]);
+  const lastInputRef = useRef('');
+  const [histOpen, setHistOpen] = useState(false);
 
   useEffect(() => {
     const msgs = load<ChatMsg[]>(MSG_KEY, []);
@@ -181,12 +236,67 @@ export default function Home() {
   function resetProgress() {
     streamAccRef.current = '';
     finishedRef.current = false;
-    setStages(REVIEW_DEFAULT_STAGES.map((s) => ({ ...s, status: 'pending' })));
-    setPhaseLabel(mode === 'deep' ? '深度论证进行中' : '快速预诊中：清晰度评估');
+    thinkingRef.current = [];
+    if (mode === 'deep') {
+      const arr = DEEP_PHASES_UI.map((s) => ({ ...s, status: 'pending' as const }));
+      stagesRef.current = arr;
+      setStages(arr);
+    } else {
+      const arr: RStage[] = [
+        { label: '清晰度评估', desc: '判断需求清晰度', status: 'pending' },
+        { label: '生成整改方案', desc: '撰写拆解报告与评审检查', status: 'pending' },
+      ];
+      stagesRef.current = arr;
+      setStages(arr);
+    }
+    setPhaseLabel(mode === 'deep' ? '评审团正在多视角论证中…' : '快速预诊中：清晰度评估');
     setPhaseDone(false);
     setStreamText('');
     setFinished(false);
     setElapsedSec(0);
+    setThinking([]);
+    setThinkingDone(false);
+    setThinkingSec(0);
+  }
+
+  function applyPhase(ev: { phase_id?: string; phase_name?: string; detail?: string; elapsed_ms?: number; end?: boolean }) {
+    const name = ev.phase_name ?? '';
+    setStages((prev) => {
+      const idx = prev.findIndex((s) => s.label === name);
+      let arr = prev;
+      if (idx >= 0) {
+        arr = [...prev];
+        arr[idx] = ev.end
+          ? { ...arr[idx], status: 'done', elapsedMs: ev.elapsed_ms }
+          : { ...arr[idx], status: 'active', desc: ev.detail ?? arr[idx].desc };
+      } else {
+        const ns: RStage = ev.end
+          ? { label: name, desc: ev.detail ?? '', status: 'done', elapsedMs: ev.elapsed_ms }
+          : { label: name, desc: ev.detail ?? '', status: 'active' };
+        arr = [...prev, ns];
+      }
+      stagesRef.current = arr;
+      return arr;
+    });
+    if (!ev.end && name) setPhaseLabel(`${name}中`);
+  }
+
+  function applyReasoning(ev: { view?: string; view_name?: string; text?: string }) {
+    const delta = ev.text;
+    if (!delta) return;
+    const key = ev.view || 'grill';
+    setThinking((prev) => {
+      const idx = prev.findIndex((t) => t.view === key);
+      if (idx >= 0) {
+        const arr = [...prev];
+        arr[idx] = { ...arr[idx], text: arr[idx].text + delta };
+        thinkingRef.current = arr;
+        return arr;
+      }
+      const arr = [...prev, { view: key, viewName: ev.view_name ?? (key === 'grill' ? '评委质询' : key), text: delta, done: false }];
+      thinkingRef.current = arr;
+      return arr;
+    });
   }
 
   function applyNode(ev: { status?: string; label?: string; desc?: string; idx?: number }) {
@@ -205,6 +315,7 @@ export default function Home() {
         while (arr.length <= idx) arr.push({ label: '…', desc: '', status: 'pending' });
         arr[idx] = { label: ev.label ?? '扩展检查项', desc: ev.desc ?? '', status };
       }
+      stagesRef.current = arr;
       return arr;
     });
   }
@@ -215,6 +326,9 @@ export default function Home() {
     const acc = streamAccRef.current;
     const content =
       isSolution && acc ? acc : (d.content as string) ?? '';
+    const tViews = thinkingRef.current.map((t) => ({ ...t }));
+    const tChars = tViews.reduce((n, t) => n + t.text.length, 0);
+    const tSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
     setMessages((prev) => [
       ...prev,
       {
@@ -230,16 +344,38 @@ export default function Home() {
         options: d.options,
         checklist: d.checklist,
         source_tags: d.source_tags,
+        plagiarism: d.plagiarism,
+        evidence: d.evidence,
         notice: d.notice,
+        phases: stagesRef.current,
+        thinking: tViews.length ? tViews : undefined,
+        thinkingMeta: tViews.length ? { chars: tChars, sec: tSec } : undefined,
+        scene,
         time: Date.now(),
       },
     ]);
     // 完成后收拢为摘要一行
     finishedRef.current = true;
+    if (isSolution && content) {
+      addHistory({
+        mode: aiMode,
+        scene,
+        summary: (lastInputRef.current || content.slice(0, 60)).slice(0, 80),
+        clarity: typeof d.clarity === 'number' ? d.clarity : undefined,
+        category: d.category,
+        content,
+        checklist: d.checklist,
+        source_tags: d.source_tags,
+        plagiarism: d.plagiarism,
+        evidence: d.evidence,
+      });
+    }
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
     setFinished(true);
     setPhaseDone(true);
     setStreamText('');
+    setThinkingDone(true);
+    setThinkingSec(tSec);
     setStages((prev) => prev.map((s) => ({ ...s, status: 'done' as const })));
   }
 
@@ -254,6 +390,7 @@ export default function Home() {
     const value = (text ?? input).trim();
     if (!value || loading) return;
     setInput('');
+    lastInputRef.current = value;
     if (view === 'hero') setView('chat');
 
     setMessages((prev) => [...prev, { id: makeId(), role: 'user', content: value, time: Date.now() }]);
@@ -261,11 +398,15 @@ export default function Home() {
     resetProgress();
     const startedAt = Date.now();
 
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(mode === 'deep' ? '/api/deep-analysis' : '/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, message: value, mode, scene, stream: true }),
+        signal: ac.signal,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -285,10 +426,23 @@ export default function Home() {
             if (ev.label) setPhaseLabel(ev.label);
             if (ev.id === 'judge' && ev.done) setPhaseDone(true);
             break;
+          case 'phase_start':
+            applyPhase(ev);
+            break;
+          case 'phase_end':
+            applyPhase({ ...ev, end: true });
+            break;
+          case 'phase_reset':
+            resetProgress();
+            break;
+          case 'reasoning_delta':
+            applyReasoning(ev);
+            break;
           case 'node':
             applyNode(ev);
             break;
           case 'token':
+          case 'content_delta':
             streamAccRef.current += ev.text ?? '';
             setStreamText(streamAccRef.current);
             break;
@@ -324,10 +478,37 @@ export default function Home() {
         pushSystem('评审过程意外结束，请重试。');
       }
     } catch (e) {
-      pushSystem(`网络异常或服务不可达：${(e as Error)?.message || '未知错误'}`);
+      if ((e as Error)?.name === 'AbortError') {
+        // 用户主动停止：保留已完成阶段与已流式内容
+        const partial = streamAccRef.current.trim();
+        if (partial) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId(),
+              role: 'ai',
+              report: true,
+              mode,
+              content: partial,
+              phases: stagesRef.current,
+              thinking: thinkingRef.current.length ? thinkingRef.current.map((t) => ({ ...t })) : undefined,
+              scene,
+              time: Date.now(),
+            },
+          ]);
+        }
+        pushSystem('论证已停止，已完成部分已保留。');
+      } else {
+        pushSystem(`网络异常或服务不可达：${(e as Error)?.message || '未知错误'}`);
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
+  }
+
+  function stopAnalysis() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -344,6 +525,13 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <ModeSwitch value={mode} onChange={setMode} />
           <button
+            onClick={() => setHistOpen(true)}
+            className="inline-flex items-center gap-1 rounded-full border border-[#e8e8ed] bg-white px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
+          >
+            <History className="h-3.5 w-3.5" />
+            历史
+          </button>
+          <button
             onClick={startNew}
             className="inline-flex items-center gap-1 rounded-full bg-[#0071e3] px-3.5 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
           >
@@ -352,6 +540,9 @@ export default function Home() {
           </button>
         </div>
       </nav>
+
+      {histOpen && <HistoryDrawer onClose={() => setHistOpen(false)} />}
+      <Toast />
 
       {view === 'hero' ? (
         <HeroStage
@@ -373,11 +564,15 @@ export default function Home() {
           finished={finished}
           elapsedSec={elapsedSec}
           streamText={streamText}
+          thinking={thinking}
+          thinkingDone={thinkingDone}
+          thinkingSec={thinkingSec}
           scrollRef={scrollRef}
           input={input}
           onInput={setInput}
           onSend={() => handleSend()}
           onPick={handleSend}
+          onStop={stopAnalysis}
         />
       )}
     </div>
@@ -499,9 +694,7 @@ function HeroStage({
 function ModeTip({ mode }: { mode: Mode }) {
   return (
     <p className="mt-3 text-[13px] text-[#86868b]">
-      {mode === 'deep'
-        ? '将启动逐节点评审流程 · 按评审环节逐一核验'
-        : '聚焦清晰度与关键缺口的快速评审'}
+      {mode === 'deep' ? '🔬 开始深度论证（约30-60秒）· 评审团将多视角核验' : '聚焦清晰度与关键缺口的快速评审'}
     </p>
   );
 }
@@ -509,8 +702,10 @@ function ModeTip({ mode }: { mode: Mode }) {
 /* 知识库背书 + 雷区警示榜 */
 function KbFooter() {
   const [open, setOpen] = useState(false);
+  const [kbOpen, setKbOpen] = useState(false);
   return (
     <div className="mt-10 w-full max-w-3xl no-print">
+      {kbOpen && <KnowledgeDrawer onClose={() => setKbOpen(false)} />}
       <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12px] text-[#c7c7cc]">
         <span className="inline-flex items-center gap-1.5">
           <BookOpen className="h-3.5 w-3.5" />评审规则库
@@ -521,7 +716,16 @@ function KbFooter() {
         <span className="inline-flex items-center gap-1.5">
           <Fingerprint className="h-3.5 w-3.5" />能力边界库
         </span>
-        <span>| 已收录案例 {PAST_CASES.length}+ · 规则 {RULE_COUNT} 条 · 边界 {BOUNDARY_COUNT} 项</span>
+        <span>
+          | 收录{KB_RULES.length}条评审规则 · {KB_CASES.length}个往届案例 · {KB_BOUNDARIES.length}项能力边界评估
+        </span>
+        <button
+          onClick={() => setKbOpen(true)}
+          className="inline-flex items-center gap-1 rounded-full border border-[#ececf0] bg-white px-2.5 py-1 text-[12px] text-[#0071e3] transition-colors hover:bg-[#f5f9ff]"
+        >
+          <BookOpen className="h-3 w-3" />
+          知识库说明
+        </button>
       </div>
 
       <div className="mx-auto mt-4 max-w-xl">
@@ -538,7 +742,7 @@ function KbFooter() {
             <button
               onClick={() => setOpen(false)}
               aria-label="收起雷区警示榜"
-              className="no-print fixed right-6 top-6 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[#ececf0] bg-white text-[#86868b] shadow-[0_4px_24px_rgba(0,0,0,0.12)] transition-all hover:scale-105 hover:text-[#1d1d1f]"
+              className="no-print fixed right-6 top-6 z-[500] flex h-11 w-11 items-center justify-center rounded-full border border-[#ececf0] bg-white text-[#86868b] shadow-[0_4px_24px_rgba(0,0,0,0.12)] transition-all hover:scale-105 hover:text-[#1d1d1f]"
             >
               <X className="h-5 w-5" />
             </button>
@@ -553,12 +757,15 @@ function KbFooter() {
               >
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[11px] font-medium" style={{ background: 'rgba(232,163,61,0.14)', color: '#B45309' }}>
-                    {c.sea_status === '红海' ? '红海' : '拥挤'} · {c.innovation_tags}
+                    {c.seaStatus === '红海' ? '红海' : '拥挤'} · {c.domain}
                   </span>
-                  <span className="text-[13px] font-semibold text-[#1d1d1f]">{c.project_name}</span>
+                  <span className="text-[13px] font-semibold text-[#1d1d1f]">{c.name}</span>
                 </div>
                 <p className="mt-1 text-[12.5px] leading-5 text-[#86868b]">
-                  差异化建议：{c.differentiation_hint}
+                  {c.redSea}
+                </p>
+                <p className="mt-0.5 text-[12.5px] leading-5 text-[#0071e3]">
+                  差异化建议：{c.differentiation}
                 </p>
               </div>
             ))}
@@ -581,11 +788,15 @@ function ChatStage({
   finished,
   elapsedSec,
   streamText,
+  thinking,
+  thinkingDone,
+  thinkingSec,
   scrollRef,
   input,
   onInput,
   onSend,
   onPick,
+  onStop,
 }: {
   mode: Mode;
   messages: ChatMsg[];
@@ -596,11 +807,15 @@ function ChatStage({
   finished: boolean;
   elapsedSec: number;
   streamText: string;
+  thinking: ThinkingView[];
+  thinkingDone: boolean;
+  thinkingSec: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   input: string;
   onInput: (v: string) => void;
   onSend: () => void;
   onPick: (t: string) => void;
+  onStop: () => void;
 }) {
   const replying = loading && mode === 'deep';
   return (
@@ -614,7 +829,26 @@ function ChatStage({
           <MessageRow key={m.id} msg={m} onPick={onPick} />
         ))}
 
-        {loading && <div className="scale-in">{replying ? <DeepReviewPanel stages={stages} finished={finished} elapsedSec={elapsedSec} /> : <QuickReview phaseLabel={phaseLabel} streamText={streamText} finished={finished} elapsedSec={elapsedSec} />}</div>}
+        {loading && (
+          <div className="scale-in flex flex-col items-center gap-3">
+            {replying ? (
+              <>
+                <DeepReviewPanel stages={stages} finished={finished} elapsedSec={elapsedSec} />
+                <DeepThinkingPanel views={thinking} done={thinkingDone} sec={thinkingSec} live={!finished} />
+                {!finished && (
+                  <button
+                    onClick={onStop}
+                    className="rounded-full border border-[#e8e8ed] bg-white px-4 py-1.5 text-[12.5px] text-[#86868b] transition-colors hover:border-[#d8d8dd] hover:text-[#1d1d1f]"
+                  >
+                    停止论证
+                  </button>
+                )}
+              </>
+            ) : (
+              <QuickReview phaseLabel={phaseLabel} streamText={streamText} finished={finished} elapsedSec={elapsedSec} />
+            )}
+          </div>
+        )}
         {loading && !replying && !streamText && !finished && <TypingIndicator label={phaseLabel} />}
       </div>
 
@@ -639,6 +873,10 @@ function ChatStage({
             <textarea
               value={input}
               onChange={(e) => onInput(e.target.value)}
+              onFocus={(e) => {
+                // 软键盘弹出时确保输入框可见
+                setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -652,10 +890,14 @@ function ChatStage({
             <button
               onClick={onSend}
               disabled={!input.trim() || loading}
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0071e3] text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0071e3] text-white transition-opacity hover:opacity-85 active:opacity-70 disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="发送"
             >
-              <Send className="h-4 w-4" />
+              {loading ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </button>
           </div>
         </div>
@@ -685,11 +927,16 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
               {msg.notice}
             </div>
           )}
+          {msg.phases?.length || msg.thinking?.length ? <ReplayBar msg={msg} /> : null}
           <ReportView
             content={msg.content}
             mode={msg.mode}
             checklist={msg.checklist}
             sourceTags={msg.source_tags}
+            plagiarism={msg.plagiarism}
+            evidence={msg.evidence}
+            clarity={msg.clarity}
+            scene={msg.scene}
           />
           <div className="no-print mt-5 flex flex-col items-center gap-2">
             <div className="text-[12px] font-medium text-[#86868b]">{NEXT_LABEL}</div>
@@ -762,7 +1009,51 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
   );
 }
 
-/* ---------- 深度论证：评审日志面板（真实环节逐个点亮） ---------- */
+/* ---------- 报告消息回看条：评审阶段 + 思考摘录可展开 ---------- */
+function ReplayBar({ msg }: { msg: ChatMsg }) {
+  const [open, setOpen] = useState(false);
+  const tChars = (msg.thinking ?? []).reduce((n, t) => n + t.text.length, 0);
+  return (
+    <div className="no-print mb-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-full border border-[#f0f0f2] bg-[#fbfbfd] px-3.5 py-1.5 text-[12px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
+      >
+        {msg.mode === 'deep' ? '🔬' : '⚡'}
+        {msg.mode === 'deep' ? '评审过程回看' : '预诊过程回看'}
+        {msg.thinking?.length ? ` · 思考摘录${tChars}字` : ''}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="fade-in mt-2 space-y-3 rounded-[16px] border border-[#f0f0f2] bg-[#fbfbfd] p-4">
+          {msg.phases?.length ? (
+            <div className="space-y-1.5">
+              {msg.phases.map((s, i) => (
+                <div key={i} className="flex items-center gap-2.5 text-[12.5px]">
+                  {s.status === 'done' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#2EA043]" />
+                  ) : (
+                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-[#d8d8dd]" />
+                  )}
+                  <span className="shrink-0 text-[#1d1d1f]">{s.label}</span>
+                  {typeof s.elapsedMs === 'number' ? (
+                    <span className="shrink-0 font-mono text-[11px] text-[#c7c7cc]">{(s.elapsedMs / 1000).toFixed(1)}s</span>
+                  ) : null}
+                  <span className="ml-auto min-w-0 truncate text-right text-[11px] text-[#c7c7cc]">{s.desc}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {msg.thinking?.map((v) => (
+            <ThinkBlock key={v.view} view={v} collapsedHeight />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- 深度论证：评审日志面板（五阶段逐个点亮） ---------- */
 function DeepReviewPanel({
   stages,
   finished,
@@ -786,7 +1077,7 @@ function DeepReviewPanel({
     <div className="mx-auto w-full max-w-md rounded-[16px] border border-[#f0f0f2] bg-white p-5 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[#1d1d1f]">
         <span className="review-pulse -ml-1 inline-block h-2 w-2 rounded-full bg-[#0071e3]" />
-        深度论证进行中
+        评审团正在多视角论证中…
       </div>
       <div className="mt-4 space-y-1.5">
         {stages.map((s, i) => (
@@ -799,7 +1090,7 @@ function DeepReviewPanel({
               <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-[#d8d8dd]" />
             )}
             <span
-              className="min-w-0 truncate"
+              className="min-w-0 shrink-0"
               style={{
                 color: s.status === 'done' ? '#86868b' : s.status === 'active' ? '#0071e3' : '#c7c7cc',
                 fontWeight: s.status === 'active' ? 600 : 400,
@@ -807,9 +1098,89 @@ function DeepReviewPanel({
             >
               {s.label}
             </span>
-            <span className="ml-auto shrink-0 text-[11px] text-[#c7c7cc]"> {s.desc}</span>
+            {s.status === 'done' && typeof s.elapsedMs === 'number' ? (
+              <span className="shrink-0 font-mono text-[11px] text-[#c7c7cc]">{(s.elapsedMs / 1000).toFixed(1)}s</span>
+            ) : null}
+            <span className="ml-auto min-w-0 truncate text-right text-[11px] text-[#c7c7cc]"> {s.desc}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 深度思考摘录（reasoning 实时流 + 完成收起可回看） ---------- */
+function DeepThinkingPanel({
+  views,
+  done,
+  sec,
+  live,
+}: {
+  views: ThinkingView[];
+  done: boolean;
+  sec: number;
+  live: boolean;
+}) {
+  const chars = views.reduce((n, t) => n + t.text.length, 0);
+  const [expanded, setExpanded] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (expanded && live && boxRef.current) {
+      boxRef.current.scrollTop = boxRef.current.scrollHeight;
+    }
+  }, [views, expanded, live]);
+
+  if (!views.length) return null;
+  if (done && !live) {
+    return (
+      <div className="mx-auto w-full max-w-md">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mx-auto flex items-center gap-1.5 rounded-full border border-[#f0f0f2] bg-[#fbfbfd] px-4 py-1.5 text-[12px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
+        >
+          <Check className="h-3.5 w-3.5 text-[#0071e3]" />
+          深度思考完成 · {chars}字 · {sec}秒
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+        {expanded && (
+          <div className="mt-2 space-y-2">
+            {views.map((v) => (
+              <ThinkBlock key={v.view} view={v} collapsedHeight />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  // 进行中：实时摘录
+  return (
+    <div className="mx-auto w-full max-w-md space-y-2">
+      {views.map((v) => (
+        <ThinkBlock key={v.view} view={v} />
+      ))}
+    </div>
+  );
+}
+
+function ThinkBlock({ view, collapsedHeight }: { view: ThinkingView; collapsedHeight?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [view.text]);
+  return (
+    <div className="rounded-[12px] border border-[#f0f0f2] bg-[#fbfbfd] px-3.5 py-2.5">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#86868b]">
+        <Brain className="h-3 w-3 text-[#0071e3]" />
+        {view.viewName}
+        {!view.done && <span className="review-pulse inline-block h-1 w-1 rounded-full bg-[#0071e3]" />}
+      </div>
+      <div
+        ref={ref}
+        className={`mt-1.5 overflow-y-auto whitespace-pre-wrap text-[12px] leading-5 text-[#86868b] ${collapsedHeight ? 'max-h-40' : 'max-h-32'}`}
+      >
+        {view.text}
+        <span className="review-caret ml-0.5 inline-block h-3 w-[2px] translate-y-[1px] bg-[#0071e3]" />
       </div>
     </div>
   );

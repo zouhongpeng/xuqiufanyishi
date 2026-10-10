@@ -1,6 +1,7 @@
 import { LLM_CONFIG } from './config';
 import { chatStream, chatText } from './llmProvider';
-import { buildKBContext, redSeaHitOnText } from './knowledge';
+import { buildKBContext, redSeaHitOnText, plagiarismHint, matchEvidence } from './knowledge';
+import { sceneSupplement } from './scenePrompts';
 
 /**
  * 需求拆解引擎：完全由 LLM 完成需求清晰度判断与完整拆解。
@@ -109,7 +110,7 @@ const CHECKLIST_SYSTEM = `你是科创项目评审记录员。根据给定的用
 }
 要求：checklist 的 14 个 item 必须与上述顺序完全一致、不得增删；status 只能取 pass/warn/fail；note 为一句话中文说明，fail/warn 项必须指出具体问题。`.trimStart();
 
-interface ChecklistItem {
+export interface ChecklistItem {
   item: string;
   status: 'pass' | 'warn' | 'fail';
   note: string;
@@ -120,6 +121,14 @@ export interface DecomposeResult {
   category: string;
   checklist: ChecklistItem[];
   source_tags: string[];
+  plagiarism?: {
+    caseName: string;
+    domain: string;
+    result: string;
+    redSea: string;
+    differentiation: string;
+  } | null;
+  evidence?: { ref: string; label: string; kind: 'rule' | 'case' | 'boundary'; text: string }[];
 }
 
 export interface DiagnosticOption {
@@ -242,8 +251,16 @@ async function llmInvoke(
   model: string,
   temperature: number,
   headers?: Headers,
+  maxTokens?: number,
 ): Promise<string> {
-  return chatText(system, user, { model, temperature, headers, timeoutMs: LLM_CONFIG.timeoutMs });
+  return chatText(system, user, {
+    model,
+    temperature,
+    headers,
+    timeoutMs: LLM_CONFIG.timeoutMs,
+    maxTokens,
+    mode: 'quick',
+  });
 }
 
 /** 调用1：需求清晰度判断（每轮都执行；scene 为前端预选场景弱提示） */
@@ -254,40 +271,47 @@ export async function judge(
 ): Promise<Judgement> {
   const expert = buildExpertBlock(scene);
   const sceneHint = scene && scene !== '智能识别' ? `\n用户预选场景：${scene}` : '';
-  const built = await llmInvoke(
-    JUDGE_SYSTEM + expert,
-    `以下是根据多轮对话整理的用户需求上下文：\n${context}${sceneHint}\n\n请判断需求清晰度。`,
-    LLM_CONFIG.judgeModel,
-    0.2,
-    headers,
-  );
-  const parsed = extractJson(built);
-  if (!parsed) {
-    throw new Error('需求判断结果无法解析为 JSON');
-  }
-  const clarity = clampClarity(parsed.clarity);
-  const missing_info = parseStringList(parsed.missing_info);
-  let clarity_desc = typeof parsed.clarity_desc === 'string' ? parsed.clarity_desc : '';
-  if (isScienceFair(scene)) {
-    const red = redSeaHitOnText(context);
-    if (red && !missing_info.includes(red)) {
-      missing_info.unshift(red);
-      if (clarity_desc && !clarity_desc.includes('红海')) clarity_desc += ` ${red}`;
+  const sceneSup = sceneSupplement(scene);
+  let lastError: unknown = new Error('需求判断结果无法解析为 JSON');
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    const built = await llmInvoke(
+      JUDGE_SYSTEM + expert + sceneSup,
+      `以下是根据多轮对话整理的用户需求上下文：\n${context}${sceneHint}\n\n请判断需求清晰度。`,
+      LLM_CONFIG.judgeModel,
+      0.7,
+      headers,
+      2000,
+    );
+    const parsed = extractJson(built);
+    if (!parsed) {
+      lastError = new Error('需求判断结果无法解析为 JSON');
+      continue;
     }
+    const clarity = clampClarity(parsed.clarity);
+    const missing_info = parseStringList(parsed.missing_info);
+    let clarity_desc = typeof parsed.clarity_desc === 'string' ? parsed.clarity_desc : '';
+    if (isScienceFair(scene)) {
+      const red = redSeaHitOnText(context);
+      if (red && !missing_info.includes(red)) {
+        missing_info.unshift(red);
+        if (clarity_desc && !clarity_desc.includes('红海')) clarity_desc += ` ${red}`;
+      }
+    }
+    const nextQuestion =
+      clarity <= 1
+        ? (typeof parsed.next_question === 'string' ? parsed.next_question : '').trim() ||
+          '能再多聊聊你想要的东西吗？比如给谁用、解决什么问题？'
+        : '';
+    return {
+      clarity,
+      category: typeof parsed.category === 'string' ? parsed.category : '其他',
+      clarity_desc,
+      missing_info,
+      next_question: nextQuestion,
+      options: clarity <= 1 ? parseOptions(parsed.options) : [],
+    };
   }
-  const nextQuestion =
-    clarity <= 1
-      ? (typeof parsed.next_question === 'string' ? parsed.next_question : '').trim() ||
-        '能再多聊聊你想要的东西吗？比如给谁用、解决什么问题？'
-      : '';
-  return {
-    clarity,
-    category: typeof parsed.category === 'string' ? parsed.category : '其他',
-    clarity_desc,
-    missing_info,
-    next_question: nextQuestion,
-    options: clarity <= 1 ? parseOptions(parsed.options) : [],
-  };
+  throw lastError;
 }
 
 /** 调用2：清晰度≥2 时生成完整拆解报告（结构化 = 报告 + 14 项检查清单 + 依据标签） */
@@ -295,17 +319,26 @@ export async function decomposeReport(
   context: string,
   headers: Headers,
   category?: string,
+  scene?: string,
 ): Promise<DecomposeResult> {
   const expert = buildExpertBlock(undefined, category);
   const report = await llmInvoke(
-    DECOMPOSE_SYSTEM + expert,
+    DECOMPOSE_SYSTEM + expert + sceneSupplement(scene),
     `请根据以下对话历史中的用户需求生成拆解报告：\n${context}`,
     LLM_CONFIG.reportModel,
     0.7,
     headers,
+    2000,
   );
   const rv = await reviewChecklist(context, report, headers);
-  return { report, category: category || '其他', checklist: rv.checklist, source_tags: rv.source_tags };
+  return {
+    report,
+    category: category || '其他',
+    checklist: rv.checklist,
+    source_tags: rv.source_tags,
+    plagiarism: plagiarismHint(context),
+    evidence: matchEvidence(context),
+  };
 }
 
 /**
@@ -322,7 +355,14 @@ export async function reviewChecklist(
       const built = await chatText(
         CHECKLIST_SYSTEM,
         `【用户需求上下文】\n${context}\n\n【拆解报告全文】\n${report}`,
-        { model: LLM_CONFIG.judgeModel, temperature: 0.2, headers, timeoutMs: LLM_CONFIG.timeoutMs },
+        {
+          model: LLM_CONFIG.judgeModel,
+          temperature: 0.2,
+          headers,
+          timeoutMs: LLM_CONFIG.timeoutMs,
+          maxTokens: 1200,
+          mode: 'quick',
+        },
       );
       const parsed = extractJson(built);
       if (parsed) {
@@ -354,16 +394,26 @@ export async function* streamReport(
   context: string,
   headers: Headers,
   category?: string,
+  scene?: string,
 ): AsyncGenerator<string | { kind: '__final'; full: string }> {
   const expert = buildExpertBlock(undefined, category);
   let acc = '';
   for await (const chunk of chatStream(
-    DECOMPOSE_SYSTEM + expert,
+    DECOMPOSE_SYSTEM + expert + sceneSupplement(scene),
     `请根据以下对话历史中的用户需求生成拆解报告：\n${context}`,
-    { model: LLM_CONFIG.reportModel, temperature: 0.7, headers, timeoutMs: LLM_CONFIG.deepseek.timeoutMs },
+    {
+      model: LLM_CONFIG.reportModel,
+      temperature: 0.7,
+      headers,
+      timeoutMs: LLM_CONFIG.deepseek.timeoutMs,
+      maxTokens: 2000,
+      mode: 'quick',
+    },
   )) {
-    acc += chunk;
-    yield chunk;
+    if (chunk.content) {
+      acc += chunk.content;
+      yield chunk.content;
+    }
   }
   yield { kind: '__final' as const, full: acc };
 }

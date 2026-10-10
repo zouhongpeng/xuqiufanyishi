@@ -13,7 +13,10 @@ import {
   CircleAlert,
   XCircle,
   ShieldCheck,
+  ImageDown,
 } from 'lucide-react';
+import { drawShareCard } from './shareCard';
+import { showToast } from './Toast';
 
 export type ReportMode = 'quick' | 'deep';
 
@@ -21,6 +24,73 @@ export interface ReviewItem {
   item: string;
   status: 'pass' | 'warn' | 'fail';
   note: string;
+}
+
+export interface PlagiarismHint {
+  caseName: string;
+  domain: string;
+  result: string;
+  redSea: string;
+  differentiation: string;
+}
+
+export interface EvidenceRef {
+  ref: string;
+  label: string;
+  kind: 'rule' | 'case' | 'boundary';
+  text: string;
+}
+
+/* ---------- 查重提示卡（风险预警区顶部） ---------- */
+function PlagiarismCard({ p }: { p: PlagiarismHint }) {
+  return (
+    <div className="mb-3 rounded-xl border border-[#f3c1bd] bg-white p-4">
+      <div className="flex items-start gap-2.5">
+        <CircleAlert className="mt-0.5 h-4.5 w-4.5 shrink-0 text-[#e5484d]" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold leading-6 text-[#1d1d1f]">
+            检测到与往届案例《{p.caseName}》方向相似
+          </p>
+          <p className="mt-1 text-[12.5px] leading-5 text-[#86868b]">
+            {p.domain} · {p.result} · {p.redSea}
+          </p>
+          <p className="mt-1.5 text-[13px] font-medium leading-5 text-[#0071e3]">
+            建议差异化：{p.differentiation}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 依据角标（悬停/点击显示原文） ---------- */
+function EvidenceBadges({ items }: { items: EvidenceRef[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!items.length) return null;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[#f3d7d5] pt-3">
+      <span className="text-[11.5px] text-[#b08885]">依据：</span>
+      {items.map((ev) => (
+        <span key={ev.ref} className="relative">
+          <button
+            onClick={() => setOpen(open === ev.ref ? null : ev.ref)}
+            title={ev.text}
+            className="rounded-full bg-white px-2 py-[2px] font-mono text-[11px] text-[#8d3a3a] transition-colors hover:bg-[#fdeceb]"
+          >
+            {ev.label}
+          </button>
+          {open === ev.ref && (
+            <span className="absolute bottom-full left-0 z-[500] mb-1.5 block w-72 rounded-lg border border-[#f0e5e4] bg-white p-3 text-[12px] leading-5 text-[#5b5b60] shadow-[0_8px_28px_rgba(0,0,0,0.14)]">
+              <b className="mb-0.5 block text-[#1d1d1f]">
+                {ev.label} · {ev.kind === 'rule' ? '评审规则' : ev.kind === 'case' ? '往届案例' : '能力边界'}
+              </b>
+              {ev.text}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 /* ---------- 解析：优先级标签（【高】/【P0】/高优先级…） ---------- */
@@ -189,11 +259,19 @@ export function ReportView({
   mode,
   checklist = [],
   sourceTags = [],
+  plagiarism = null,
+  evidence = [],
+  clarity,
+  scene,
 }: {
   content: string;
   mode?: ReportMode;
   checklist?: ReviewItem[];
   sourceTags?: string[];
+  plagiarism?: PlagiarismHint | null;
+  evidence?: EvidenceRef[];
+  clarity?: number;
+  scene?: string;
 }) {
   const blocks = useMemo(() => parseMarkdown(content), [content]);
   const listKey = useMemo(() => `req-decomposer:check:${hash(content)}`, [content]);
@@ -231,8 +309,23 @@ export function ReportView({
 
   return (
     <article className="report-sheet relative mx-auto w-full max-w-3xl rounded-[16px] bg-white text-left shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
-      <ReportHeader mode={mode} onCopy={copy} copied={copied} sourceTags={sourceTags} />
-      <Body blocks={blocks} checks={checks} onToggle={toggle} />
+      <ReportHeader
+        mode={mode}
+        onCopy={copy}
+        copied={copied}
+        sourceTags={sourceTags}
+        clarity={clarity}
+        scene={scene}
+        title={blocks.find((b) => b.type === 'heading' && b.level === 1)?.text?.trim()}
+        checklist={checklist}
+        content={content}
+      />
+      <Body blocks={blocks} checks={checks} onToggle={toggle} plagiarism={plagiarism} evidence={evidence} />
+      {!hasRiskSection(blocks) && plagiarism ? (
+        <div className="px-6 pb-2 sm:px-10">
+          <PlagiarismCard p={plagiarism} />
+        </div>
+      ) : null}
       {checklist.length > 0 ? <ReviewChecklist items={checklist} /> : null}
     </article>
   );
@@ -243,40 +336,92 @@ function ReportHeader({
   onCopy,
   copied,
   sourceTags = [],
+  clarity,
+  scene,
+  title,
+  checklist = [],
+  content,
 }: {
   mode?: ReportMode;
   onCopy: () => void;
   copied: boolean;
   sourceTags?: string[];
+  clarity?: number;
+  scene?: string;
+  title?: string;
+  checklist?: ReviewItem[];
+  content: string;
 }) {
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState(false);
+  const exportShareCard = async () => {
+    setExporting(true);
+    try {
+      await drawShareCard({ title: title || '项目拆解报告', mode, clarity, scene, checklist, content });
+      setExported(true);
+      showToast('分享图已生成并开始下载');
+      setTimeout(() => setExported(false), 2000);
+    } catch {
+      /* 绘制失败静默恢复 */
+    } finally {
+      setExporting(false);
+    }
+  };
   return (
     <div className="border-b border-[#f0f0f2] px-6 py-4 sm:px-10">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-[13px] font-medium">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] font-medium">
           {mode === 'deep' || !mode ? (
             <>
-              <Fingerprint className="h-4 w-4 text-[#0071e3]" />
+              <Fingerprint className="h-4 w-4 shrink-0 text-[#0071e3]" />
               <span className="text-[#1d1d1f]">深度论证</span>
-              <span className="text-[#86868b]">· 逐节点评审</span>
+              <span className="hidden text-[#86868b] sm:inline">· 逐节点评审</span>
             </>
           ) : (
             <>
-              <Zap className="h-4 w-4 text-[#0071e3]" />
+              <Zap className="h-4 w-4 shrink-0 text-[#0071e3]" />
               <span className="text-[#1d1d1f]">快速预诊</span>
             </>
           )}
+          {scene ? (
+            <span className="rounded-full bg-[#f5f5f7] px-2 py-[2px] text-[11px] font-medium text-[#86868b]">
+              {scene}
+            </span>
+          ) : null}
         </div>
         <div className="no-print flex items-center gap-2">
           <button
+            onClick={exportShareCard}
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? (
+              <>
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#0071e3] border-t-transparent" />
+                生成中…
+              </>
+            ) : exported ? (
+              <>
+                <Check className="h-3.5 w-3.5" />
+                已导出
+              </>
+            ) : (
+              <>
+                <ImageDown className="h-3.5 w-3.5" />
+                导出分享图
+              </>
+            )}
+          </button>
+          <button
             onClick={onCopy}
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7]"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
           >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? '已复制' : '一键复制'}
           </button>
           <button
             onClick={() => window.print()}
-            className="no-print inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7]"
+            className="no-print inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
           >
             <Printer className="h-3.5 w-3.5" />
             打印
@@ -301,14 +446,22 @@ function ReportHeader({
   );
 }
 
+function hasRiskSection(blocks: Block[]): boolean {
+  return blocks.some((b) => b.type === 'heading' && /风险|预警/.test((b.text ?? '').toLowerCase()));
+}
+
 function Body({
   blocks,
   checks,
   onToggle,
+  plagiarism = null,
+  evidence = [],
 }: {
   blocks: Block[];
   checks: Record<string, boolean>;
   onToggle: (k: string) => void;
+  plagiarism?: PlagiarismHint | null;
+  evidence?: EvidenceRef[];
 }) {
   const title = blocks.find((b) => b.type === 'heading' && b.level === 1)?.text?.trim();
   const rest = blocks.filter(
@@ -425,6 +578,7 @@ function Body({
                 风险预警与降级方案
               </h2>
               <div className="mt-4 space-y-3 rounded-r-[14px] border-l-4 border-[#e5484d] bg-[#fff5f5] p-5">
+                {plagiarism ? <PlagiarismCard p={plagiarism} /> : null}
                 {sec.blocks.map((b, bi) =>
                   b.type === 'list' ? (
                     <ul key={bi} className="space-y-2">
@@ -440,6 +594,7 @@ function Body({
                     </p>
                   ),
                 )}
+                <EvidenceBadges items={evidence} />
               </div>
             </section>
           );
