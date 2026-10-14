@@ -16,11 +16,15 @@ import {
   History,
 } from 'lucide-react';
 import { ReportView, type ReviewItem, type PlagiarismHint, type EvidenceRef } from '@/components/ReportView';
+import type { StructuredReport, ClarifyQuestion } from '@/lib/deepChain';
 import { DiagnosisCard, type DiagnosticOption } from '@/components/DiagnosisCard';
+import BentoHome from '@/components/BentoHome';
+import { ReportSkeleton } from '@/components/Skeleton';
+import { useReveal } from '@/lib/useReveal';
 import KnowledgeDrawer from '@/components/KnowledgeDrawer';
 import HistoryDrawer from '@/components/HistoryDrawer';
 import Toast from '@/components/Toast';
-import { addHistory } from '@/lib/history';
+import { addHistory, type HistoryEntry } from '@/lib/history';
 import kbCasesData from '@/data/knowledge/cases.json';
 import kbRulesData from '@/data/knowledge/rules.json';
 import kbBoundariesData from '@/data/knowledge/boundaries.json';
@@ -50,6 +54,8 @@ interface ChatMsg {
   source_tags?: string[];
   plagiarism?: PlagiarismHint | null;
   evidence?: EvidenceRef[];
+  structured?: StructuredReport | null;
+  clarifications?: ClarifyQuestion[];
   notice?: string;
   phases?: RStage[];
   thinking?: ThinkingView[];
@@ -210,12 +216,21 @@ export default function Home() {
     }
   }, [mode, sessionId, hydrated]);
 
+  // 进行中阶段的实时推理摘要（取最新思考流的末尾）
+  const liveNote = (() => {
+    const last = thinking[thinking.length - 1];
+    if (!last || finished) return '';
+    const t = last.text.replace(/\s+/g, ' ').trim();
+    return t.length > 110 ? `…${t.slice(-110)}` : t;
+  })();
+
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, []);
   useEffect(() => {
     if (hydrated) scrollToBottom();
   }, [messages, loading, streamText, hydrated, scrollToBottom]);
+  useReveal([view, hydrated, loading]);
 
   function save(key: string, value: unknown) {
     try {
@@ -320,7 +335,7 @@ export default function Home() {
     });
   }
 
-  function commitResult(d: Record<string, any>, startedAt: number) {
+  function commitResult(d: Record<string, unknown>, startedAt: number) {
     const isSolution = d.type === 'solution';
     const aiMode: Mode = d.mode === 'deep' ? 'deep' : 'quick';
     const acc = streamAccRef.current;
@@ -329,31 +344,31 @@ export default function Home() {
     const tViews = thinkingRef.current.map((t) => ({ ...t }));
     const tChars = tViews.reduce((n, t) => n + t.text.length, 0);
     const tSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: makeId(),
-        role: 'ai',
-        report: isSolution,
-        mode: aiMode,
-        content,
-        clarity: d.clarity,
-        category: d.category,
-        clarity_desc: d.clarity_desc,
-        missing_info: d.missing_info,
-        options: d.options,
-        checklist: d.checklist,
-        source_tags: d.source_tags,
-        plagiarism: d.plagiarism,
-        evidence: d.evidence,
-        notice: d.notice,
-        phases: stagesRef.current,
-        thinking: tViews.length ? tViews : undefined,
-        thinkingMeta: tViews.length ? { chars: tChars, sec: tSec } : undefined,
-        scene,
-        time: Date.now(),
-      },
-    ]);
+    const msg: ChatMsg = {
+      id: makeId(),
+      role: 'ai',
+      report: isSolution,
+      mode: aiMode,
+      content,
+      clarity: typeof d.clarity === 'number' ? d.clarity : undefined,
+      category: typeof d.category === 'string' ? d.category : undefined,
+      clarity_desc: typeof d.clarity_desc === 'string' ? d.clarity_desc : undefined,
+      missing_info: d.missing_info as string[] | undefined,
+      options: d.options as ChatMsg['options'],
+      checklist: d.checklist as ChatMsg['checklist'],
+      source_tags: d.source_tags as string[] | undefined,
+      plagiarism: d.plagiarism as ChatMsg['plagiarism'],
+      evidence: d.evidence as ChatMsg['evidence'],
+      structured: d.structured as ChatMsg['structured'],
+      clarifications: d.clarifications as ChatMsg['clarifications'],
+      notice: typeof d.notice === 'string' ? d.notice : undefined,
+      phases: stagesRef.current,
+      thinking: tViews.length ? tViews : undefined,
+      thinkingMeta: tViews.length ? { chars: tChars, sec: tSec } : undefined,
+      scene,
+      time: Date.now(),
+    };
+    setMessages((prev) => [...prev, msg]);
     // 完成后收拢为摘要一行
     finishedRef.current = true;
     if (isSolution && content) {
@@ -361,13 +376,13 @@ export default function Home() {
         mode: aiMode,
         scene,
         summary: (lastInputRef.current || content.slice(0, 60)).slice(0, 80),
-        clarity: typeof d.clarity === 'number' ? d.clarity : undefined,
-        category: d.category,
+        clarity: msg.clarity,
+        category: msg.category,
         content,
-        checklist: d.checklist,
-        source_tags: d.source_tags,
-        plagiarism: d.plagiarism,
-        evidence: d.evidence,
+        checklist: msg.checklist,
+        source_tags: msg.source_tags,
+        plagiarism: msg.plagiarism,
+        evidence: msg.evidence,
       });
     }
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
@@ -410,7 +425,8 @@ export default function Home() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        pushSystem(`评审服务出错：${(data as any).detail || (data as any).error || '未知错误'}`);
+        const errData = data as { detail?: string; error?: string };
+        pushSystem(`评审服务出错：${errData.detail || errData.error || '未知错误'}`);
         return;
       }
       if (!res.body || !res.body.getReader) throw new Error('当前环境不支持流式连接');
@@ -419,11 +435,11 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buf = '';
 
-      const handleEvent = (ev: any) => {
+      const handleEvent = (ev: Record<string, unknown>) => {
         if (!ev || typeof ev !== 'object') return;
         switch (ev.type) {
           case 'phase':
-            if (ev.label) setPhaseLabel(ev.label);
+            if (typeof ev.label === 'string') setPhaseLabel(ev.label);
             if (ev.id === 'judge' && ev.done) setPhaseDone(true);
             break;
           case 'phase_start':
@@ -447,7 +463,7 @@ export default function Home() {
             setStreamText(streamAccRef.current);
             break;
           case 'result':
-            commitResult(ev.result, startedAt);
+            commitResult(ev.result as Record<string, unknown>, startedAt);
             break;
           case 'error':
             pushSystem(`评审中断：${ev.message || '未知错误'}`);
@@ -464,9 +480,9 @@ export default function Home() {
         for (const part of parts) {
           const line = part.split('\n').find((l) => l.startsWith('data: '));
           if (!line) continue;
-          let ev: any;
+          let ev: Record<string, unknown>;
           try {
-            ev = JSON.parse(line.slice(6));
+            ev = JSON.parse(line.slice(6)) as Record<string, unknown>;
           } catch {
             continue;
           }
@@ -512,7 +528,7 @@ export default function Home() {
   }
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden bg-white text-[#1d1d1f]">
+    <div className="relative flex h-dvh flex-col overflow-hidden bg-[#f5f5f7] text-[#1d1d1f]">
       <div
         className="hero-glow"
         style={{ top: '-200px', left: '50%', transform: 'translateX(-50%)' }}
@@ -552,6 +568,7 @@ export default function Home() {
           input={input}
           onInput={setInput}
           onSend={() => handleSend()}
+          onFill={(t) => setInput(t)}
         />
       ) : (
         <ChatStage
@@ -567,6 +584,7 @@ export default function Home() {
           thinking={thinking}
           thinkingDone={thinkingDone}
           thinkingSec={thinkingSec}
+          liveNote={liveNote}
           scrollRef={scrollRef}
           input={input}
           onInput={setInput}
@@ -612,6 +630,12 @@ function ModeSwitch({ value, onChange }: { value: Mode; onChange: (m: Mode) => v
 }
 
 /* ==================== 第一幕：首屏 ==================== */
+const HERO_EXAMPLES = [
+  '我想做一个智能垃圾分类桶，帮社区自动识别垃圾种类',
+  '校园二手书交易小程序，学生扫码即可发布和购买',
+  '基于 AI 的背单词 App，根据遗忘曲线自动安排复习',
+];
+
 function HeroStage({
   mode,
   scene,
@@ -619,6 +643,7 @@ function HeroStage({
   input,
   onInput,
   onSend,
+  onFill,
 }: {
   mode: Mode;
   scene: string;
@@ -626,63 +651,102 @@ function HeroStage({
   input: string;
   onInput: (v: string) => void;
   onSend: () => void;
+  onFill: (t: string) => void;
 }) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
+
   return (
-    <div className="fade-in relative z-10 flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10 text-center">
-      <h1 className="max-w-4xl text-[40px] font-bold leading-[1.12] tracking-tight text-[#1d1d1f] sm:text-[54px]">
-        像评委一样，审视你的每一个项目想法
-      </h1>
-      <p className="mt-5 text-[16px] text-[#86868b] sm:text-[18px]">
-        输入你的项目创意，我会按科创赛评审标准逐项核验，追问到位后为你出整改行动方案。
-      </p>
-
-      <div className="mt-10 w-full max-w-2xl">
-        {/* 场景胶囊 */}
-        <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
-          {SCENES.map((s) => (
-            <button
-              key={s}
-              onClick={() => onScene(s)}
-              className={`rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
-                s === scene
-                  ? 'border-[#0071e3] text-[#0071e3] font-medium'
-                  : 'border-[#e8e8ed] bg-white text-[#86868b] hover:text-[#1d1d1f]'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        {/* 大输入框 */}
-        <div className="flex items-center gap-2 rounded-[16px] border border-[#d8d8dd] bg-white px-4 py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.06)] transition-shadow focus-within:border-[#0071e3] focus-within:ring-4 focus-within:ring-[#0071e3]/10">
-          <textarea
-            value={input}
-            onChange={(e) => onInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                onSend();
-              }
-            }}
-            rows={1}
-            placeholder="输入你的项目想法…"
-            className="max-h-28 flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
-          />
-          <button
-            onClick={onSend}
-            disabled={!input.trim()}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#0071e3] text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="开始评审"
-          >
-            <Send className="h-[18px] w-[18px]" />
-          </button>
-        </div>
-
-        <ModeTip mode={mode} />
-        <p className="mt-2 text-[12px] text-[#c7c7cc]">
-          评审知识库 · 覆盖评审规则 / 往届案例 / 能力边界
+    <div className="fade-in relative z-10 flex flex-1 flex-col items-center overflow-y-auto px-5 py-8 sm:px-6">
+      <div className="w-full max-w-3xl text-center">
+        {/* 品牌区 */}
+        <div className="mono-tag">NEED DECOMPOSER</div>
+        <h1 className="mt-2 max-w-4xl text-[36px] font-bold leading-[1.12] tracking-tight text-[#1d1d1f] sm:text-[52px]">
+          像评委一样，审视你的每一个项目想法
+        </h1>
+        <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[#86868b] sm:text-[17px]">
+          需求拆解师：输入你的项目创意，先问后拆，按科创赛评审标准逐项核验，出整改行动方案。
         </p>
+
+        <div className="mt-8">
+          {/* 场景胶囊 */}
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+            {SCENES.map((s) => (
+              <button
+                key={s}
+                onClick={() => onScene(s)}
+                className={`rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
+                  s === scene
+                    ? 'border-[#0071e3] bg-white font-medium text-[#0071e3]'
+                    : 'border-[#e8e8ed] bg-white text-[#86868b] hover:text-[#1d1d1f]'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {/* 输入卡片 */}
+          <div className="rounded-[20px] border border-[#e8e8ed] bg-white p-3 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.06)] transition-all duration-150 focus-within:border-[#0071e3] focus-within:ring-4 focus-within:ring-[#0071e3]/10">
+            <textarea
+              ref={taRef}
+              value={input}
+              onChange={(e) => onInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  onSend();
+                }
+              }}
+              rows={2}
+              maxLength={2000}
+              placeholder="输入你的项目想法，越具体越好…"
+              className="w-full resize-none bg-transparent px-2 py-2 text-[16px] leading-7 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
+            />
+            <div className="flex items-center justify-between px-2 pb-1">
+              <span className="text-[11.5px] tabular-nums text-[#c7c7cc]">{input.length}/2000</span>
+              <button
+                onClick={onSend}
+                disabled={!input.trim()}
+                className="press inline-flex items-center gap-1.5 rounded-full bg-[#0071e3] px-5 py-2 text-[14px] font-medium text-white transition-all duration-150 hover:bg-[#0077ed] active:bg-[#0068d1] disabled:cursor-not-allowed disabled:opacity-30"
+                aria-label="开始评审"
+              >
+                <Send className="h-4 w-4" />
+                开始评审
+              </button>
+            </div>
+          </div>
+
+          {/* 示例一键填入 */}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            {HERO_EXAMPLES.map((t) => (
+              <button
+                key={t}
+                onClick={() => onFill(t)}
+                className="press rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[12.5px] text-[#86868b] transition-colors hover:border-[#0071e3] hover:text-[#0071e3]"
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <ModeTip mode={mode} />
+        </div>
+      </div>
+
+      {/* Bento 功能介绍区 */}
+      <div className="mt-10 w-full max-w-3xl">
+        <BentoHome
+          rulesCount={KB_RULES.length}
+          casesCount={KB_CASES.length}
+          boundariesCount={KB_BOUNDARIES.length}
+          onExample={onFill}
+        />
       </div>
 
       {/* 知识库背书 + 雷区警示榜 */}
@@ -791,6 +855,7 @@ function ChatStage({
   thinking,
   thinkingDone,
   thinkingSec,
+  liveNote,
   scrollRef,
   input,
   onInput,
@@ -810,6 +875,7 @@ function ChatStage({
   thinking: ThinkingView[];
   thinkingDone: boolean;
   thinkingSec: number;
+  liveNote: string;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   input: string;
   onInput: (v: string) => void;
@@ -818,6 +884,13 @@ function ChatStage({
   onStop: () => void;
 }) {
   const replying = loading && mode === 'deep';
+  const chatTaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = chatTaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
   return (
     <>
       <div
@@ -833,7 +906,7 @@ function ChatStage({
           <div className="scale-in flex flex-col items-center gap-3">
             {replying ? (
               <>
-                <DeepReviewPanel stages={stages} finished={finished} elapsedSec={elapsedSec} />
+                <DeepReviewPanel stages={stages} finished={finished} elapsedSec={elapsedSec} liveNote={liveNote} />
                 <DeepThinkingPanel views={thinking} done={thinkingDone} sec={thinkingSec} live={!finished} />
                 {!finished && (
                   <button
@@ -849,7 +922,17 @@ function ChatStage({
             )}
           </div>
         )}
-        {loading && !replying && !streamText && !finished && <TypingIndicator label={phaseLabel} />}
+        {loading && !replying && !streamText && !finished && (
+          <div className="mx-auto w-full max-w-md space-y-3">
+            <div className="flex justify-center">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#f0f0f2] bg-white px-4 py-2 text-[12.5px] text-[#86868b]">
+                <span className="review-pulse inline-block h-1.5 w-1.5 rounded-full bg-[#0071e3]" />
+                {phaseLabel || '快速预诊中…'}
+              </div>
+            </div>
+            <ReportSkeleton />
+          </div>
+        )}
       </div>
 
       {/* 底部输入 */}
@@ -869,8 +952,9 @@ function ChatStage({
             </div>
           )}
           {mode === 'deep' && <ModeTip mode={mode} />}
-          <div className="flex items-end gap-2 rounded-full border border-[#d8d8dd] bg-white px-4 py-1 shadow-[0_4px_24px_rgba(0,0,0,0.04)] focus-within:border-[#0071e3]">
+          <div className="flex items-end gap-2 rounded-[20px] border border-[#d8d8dd] bg-white px-4 py-2 shadow-[0_4px_24px_rgba(0,0,0,0.04)] transition-all focus-within:border-[#0071e3]">
             <textarea
+              ref={chatTaRef}
               value={input}
               onChange={(e) => onInput(e.target.value)}
               onFocus={(e) => {
@@ -884,9 +968,11 @@ function ChatStage({
                 }
               }}
               rows={1}
+              maxLength={2000}
               placeholder="继续输入…（回车发送）"
-              className="max-h-28 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
+              className="min-h-9 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
             />
+            <span className="pb-2 text-[11px] tabular-nums text-[#c7c7cc]">{input.length}/2000</span>
             <button
               onClick={onSend}
               disabled={!input.trim() || loading}
@@ -937,6 +1023,8 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
             evidence={msg.evidence}
             clarity={msg.clarity}
             scene={msg.scene}
+            structured={msg.structured}
+            clarifications={msg.clarifications}
           />
           <div className="no-print mt-5 flex flex-col items-center gap-2">
             <div className="text-[12px] font-medium text-[#86868b]">{NEXT_LABEL}</div>
@@ -952,6 +1040,22 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 先问后拆：澄清问题卡（回答后进入完整论证）
+  if (msg.role === 'ai' && !msg.report && msg.clarifications && msg.clarifications.length > 0) {
+    return (
+      <div className="flex w-full justify-start">
+        <div className="w-full max-w-[85%]">
+          <div className="mb-1 text-[11px] font-medium text-[#86868b] no-print">🔬 深度论证 · 先问后拆</div>
+          <div className="rounded-[20px] border border-[#e8e8ed] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.06)]">
+            <p className="text-[15px] font-semibold text-[#1d1d1f]">开工前，先确认几个关键问题</p>
+            <p className="mt-1 text-[12.5px] text-[#86868b]">回答后评审团将带着这些前提开始论证（也可以跳过）。</p>
+            <ClarifyForm items={msg.clarifications} onSend={onPick} />
           </div>
         </div>
       </div>
@@ -1009,6 +1113,59 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
   );
 }
 
+/* ---------- 先问后拆：澄清问答表单 ---------- */
+function ClarifyForm({ items, onSend }: { items: ClarifyQuestion[]; onSend: (t: string) => void }) {
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const filled = items.every((_, i) => (answers[i] ?? '').trim());
+  const send = (skip: boolean) => {
+    if (skip) {
+      onSend('信息已足够，直接开始深度论证。');
+      return;
+    }
+    if (!filled) return;
+    const text = items
+      .map((c, i) => `${c.q}\n我的回答：${(answers[i] ?? '').trim()}`)
+      .join('\n');
+    onSend(`【澄清回答】\n${text}\n请基于以上回答开始完整深度论证。`);
+  };
+  return (
+    <div className="mt-3 space-y-3">
+      {items.map((c, i) => (
+        <div key={i} className="rounded-2xl bg-[#f5f5f7] px-4 py-3">
+          <p className="text-[13.5px] font-medium text-[#1d1d1f]">
+            {String(i + 1).padStart(2, '0')}　{c.q}
+          </p>
+          {c.hint ? <p className="mt-0.5 text-[12px] text-[#86868b]">{c.hint}</p> : null}
+          <input
+            value={answers[i] ?? ''}
+            onChange={(e) => setAnswers((prev) => ({ ...prev, [i]: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && filled) send(false);
+            }}
+            placeholder="输入你的回答…"
+            className="mt-2 w-full rounded-xl border border-[#e8e8ed] bg-white px-3 py-2 text-[13.5px] text-[#1d1d1f] outline-none transition-colors placeholder:text-[#c7c7cc] focus:border-[#0071e3]"
+          />
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => send(false)}
+          disabled={!filled}
+          className="press rounded-full bg-[#0071e3] px-5 py-2 text-[13.5px] font-medium text-white transition-all hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          回答完毕，开始论证
+        </button>
+        <button
+          onClick={() => send(true)}
+          className="rounded-full border border-[#e8e8ed] bg-white px-4 py-2 text-[13px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
+        >
+          跳过澄清，直接论证
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- 报告消息回看条：评审阶段 + 思考摘录可展开 ---------- */
 function ReplayBar({ msg }: { msg: ChatMsg }) {
   const [open, setOpen] = useState(false);
@@ -1058,10 +1215,12 @@ function DeepReviewPanel({
   stages,
   finished,
   elapsedSec,
+  liveNote = '',
 }: {
   stages: RStage[];
   finished: boolean;
   elapsedSec: number;
+  liveNote?: string;
 }) {
   if (finished) {
     return (
@@ -1074,7 +1233,7 @@ function DeepReviewPanel({
     );
   }
   return (
-    <div className="mx-auto w-full max-w-md rounded-[16px] border border-[#f0f0f2] bg-white p-5 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
+    <div className="mx-auto w-full max-w-md rounded-[16px] border border-[#f0f0f2] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.06)]">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[#1d1d1f]">
         <span className="review-pulse -ml-1 inline-block h-2 w-2 rounded-full bg-[#0071e3]" />
         评审团正在多视角论证中…
@@ -1105,6 +1264,16 @@ function DeepReviewPanel({
           </div>
         ))}
       </div>
+      {liveNote ? (
+        <div className="mt-3 rounded-xl bg-[#f5f5f7] px-3.5 py-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#86868b]">
+            <Brain className="h-3 w-3 text-[#0071e3]" />
+            评审团正在思考
+            <span className="review-pulse inline-block h-1 w-1 rounded-full bg-[#0071e3]" />
+          </div>
+          <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#86868b]">{liveNote}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

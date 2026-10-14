@@ -61,7 +61,7 @@ export async function deepRun(context: string): Promise<DeepResult> {
       signal: ctrl.signal,
     });
 
-    const raw: any = await res.json().catch(() => ({}));
+    const raw = (await res.json().catch(() => ({}))) as { code?: number; msg?: string; error?: string; data?: unknown };
     if (!res.ok || (raw.code !== undefined && raw.code !== 0)) {
       throw new Error(raw?.msg || raw?.error || `工作流调用失败（HTTP ${res.status}）`);
     }

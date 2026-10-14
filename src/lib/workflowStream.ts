@@ -135,17 +135,20 @@ export async function* streamDeepWorkflow(
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed.startsWith('{')) continue;
-        let obj: any;
+        let obj: Record<string, unknown>;
         try {
-          obj = JSON.parse(trimmed);
+          obj = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
           continue;
         }
+        const sub = (k: string) => (obj[k] ?? null) as Record<string, unknown> | null;
+        const objData = sub('data');
+        const objMsg = sub('message');
         const event = obj.event ?? obj.type ?? '';
         const nodeName =
           obj.node_name ??
           obj.nodeName ??
-          (obj.data && (obj.data.node_name || obj.data.nodeTitle)) ??
+          (objData && (objData.node_name || objData.nodeTitle)) ??
           '';
         if (nodeName) {
           const stage = matchStage(String(nodeName));
@@ -158,8 +161,8 @@ export async function* streamDeepWorkflow(
         // 最终消息内容（对话结果）
         const content =
           obj.content ??
-          (obj.message && (obj.message.content ?? obj.message.content)) ??
-          (obj.data && obj.data.output) ??
+          (objMsg && (objMsg.content ?? objMsg.content)) ??
+          (objData && objData.output) ??
           '';
         if (content && typeof content === 'string' && content.length > finalContent.length) {
           finalContent = content;
@@ -186,26 +189,29 @@ function parseDeepOutput(text: string): DeepResult | null {
   // 尝试从含 JSON 的文本中提取 clarity 与 question/solution_result
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
-  let obj: any;
+  let obj: Record<string, unknown>;
   try {
-    obj = JSON.parse(m[0]);
+    obj = JSON.parse(m[0]) as Record<string, unknown>;
   } catch {
     // 可能在 JSON 字符串里（data 二次解析）
     try {
-      obj = JSON.parse(text);
+      obj = JSON.parse(text) as Record<string, unknown>;
     } catch {
       return null;
     }
   }
-  const clarity =
-    obj.clarity ?? obj.data?.clarity ?? obj.message?.clarity ?? obj.result?.clarity;
-  const question = obj.question_result ?? obj.message?.question_result;
-  const solution = obj.solution_result ?? obj.message?.solution_result;
+  const sub = (k: string) => (obj[k] ?? null) as Record<string, unknown> | null;
+  const data = sub('data');
+  const message = sub('message');
+  const result = sub('result');
+  const clarity = obj.clarity ?? data?.clarity ?? message?.clarity ?? result?.clarity;
+  const question = obj.question_result ?? message?.question_result;
+  const solution = obj.solution_result ?? message?.solution_result;
   if (clarity === undefined) return null;
   const c = Number(clarity) || 0;
   return {
     clarity: c,
-    category: String(obj.category ?? obj.data?.category ?? '') || '科创赛诊断',
+    category: String(obj.category ?? data?.category ?? '') || '科创赛诊断',
     content: c <= 1 ? String(question ?? '') : String(solution ?? ''),
   };
 }

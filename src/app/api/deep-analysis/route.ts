@@ -1,5 +1,4 @@
-import { appendTurn } from '@/lib/sessionStore';
-import { checkRate, clientIp, RATE_RULES } from '@/lib/rateLimit';
+import { appendTurn, turnCount } from '@/lib/sessionStore';
 import { runDeepChain } from '@/lib/deepChain';
 import { streamDeepWorkflow, FALLBACK_STAGES } from '@/lib/workflowStream';
 import { deepRun } from '@/lib/workflow';
@@ -25,11 +24,6 @@ export async function POST(req: Request) {
     return json(400, { error: '缺少 sessionId 或 message' });
   }
 
-  const rule = checkRate(`deep:${clientIp(req)}`, RATE_RULES.deep);
-  if (rule) {
-    return json(429, { error: `深度论证请求过于频繁（${rule.label}），请稍后再试` });
-  }
-
   const msg = message.trim();
   const { context, turns } = appendTurn(sessionId, msg);
 
@@ -44,7 +38,9 @@ export async function POST(req: Request) {
       const sink = makeSink(controller);
       const effectiveScene = scene && scene !== '智能识别' ? scene : undefined;
       try {
-        await runDeepChain(context, req.headers, effectiveScene, (ev) => sink.send(ev.type, ev as unknown as Record<string, unknown>), turns.length);
+        await runDeepChain(context, req.headers, effectiveScene, (ev) => sink.send(ev.type, ev as unknown as Record<string, unknown>), turns.length, {
+          clarify: turnCount(sessionId) === 1,
+        });
       } catch (chainErr) {
         console.log(
           `[deep-chain] 五阶段链失败，降级扣子工作流：${(chainErr as Error)?.message ?? String(chainErr)}`,
@@ -126,8 +122,8 @@ function publishResult(
       round,
       checklist: r.checklist ?? [],
       source_tags: r.source_tags ?? [],
-      plagiarism: (r as any).plagiarism,
-      evidence: (r as any).evidence,
+      plagiarism: r.plagiarism,
+      evidence: r.evidence,
       ...(notice ? { notice } : {}),
     },
   });

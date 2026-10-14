@@ -13,3 +13,7 @@ export function appendTurn(sessionId: string, message: string): { context: strin
   sessions.set(sessionId, turns);
   return { context: buildContextInput(turns), turns };
 }
+
+export function turnCount(sessionId: string): number {
+  return (sessions.get(sessionId) ?? []).length;
+}

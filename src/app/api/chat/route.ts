@@ -10,7 +10,7 @@ import {
   streamDeepWorkflow,
   FALLBACK_STAGES,
 } from '@/lib/workflowStream';
-import { appendTurn } from '@/lib/sessionStore';
+import { appendTurn, turnCount } from '@/lib/sessionStore';
 import { checkRate, clientIp, RATE_RULES } from '@/lib/rateLimit';
 import { runDeepChain } from '@/lib/deepChain';
 
@@ -84,20 +84,17 @@ export async function POST(req: Request) {
   const mode = rawMode === 'deep' ? 'deep' : 'quick';
   const msg = message.trim();
 
-  const rateRule = checkRate(`${mode}:${clientIp(req)}`, RATE_RULES[mode]);
-  if (rateRule) {
-    return json(429, {
-      error:
-        mode === 'deep'
-          ? `深度论证请求过于频繁（${rateRule.label}），请稍后再试`
-          : `请求过于频繁（${rateRule.label}），请稍后再试`,
-    });
+  if (mode === 'quick') {
+    const rateRule = checkRate(`quick:${clientIp(req)}`, RATE_RULES.quick);
+    if (rateRule) {
+      return json(429, { error: `请求过于频繁（${rateRule.label}），请稍后再试` });
+    }
   }
 
   const { context, turns } = appendTurn(sessionId, msg);
 
   if (!stream) {
-    return runNonStream(context, req.headers, mode, scene, turns.length);
+    return runNonStream(context, req.headers, mode, scene, turns.length, sessionId);
   }
 
   const headers = new Headers({
@@ -113,7 +110,7 @@ export async function POST(req: Request) {
         mode === 'deep' && scene && scene !== DEFAULT_SCENE ? scene : undefined;
       try {
         if (mode === 'deep') {
-          await streamDeep(sink, context, req.headers, effectiveScene, turns.length);
+          await streamDeep(sink, context, req.headers, effectiveScene, turns.length, sessionId);
         } else {
           await streamQuick(sink, context, req.headers, scene, turns.length);
         }
@@ -180,6 +177,7 @@ async function streamDeep(
   headers: Headers,
   scene: string | undefined,
   round: number,
+  sessionId?: string,
 ) {
   try {
     await runDeepChain(
@@ -188,6 +186,7 @@ async function streamDeep(
       scene,
       (ev) => sink.send(ev.type, ev as unknown as Record<string, unknown>),
       round,
+      { clarify: turnCount(sessionId ?? '') === 1 },
     );
     return;
   } catch (chainErr) {
@@ -320,44 +319,22 @@ async function runNonStream(
   mode: 'quick' | 'deep',
   scene?: string,
   round?: number,
+  sessionId?: string,
 ) {
-  // 深度模式
+  // 深度模式：与流式一致走 DeepSeek 五阶段链（clarify/完整结果原样返回）
   if (mode === 'deep') {
-    if (!process.env.COZE_PAT) {
-      try {
-        const r = await deepViaLLM(context, headers, scene);
-        return json(200, {
-          type: r.clarity <= 1 ? 'question' : 'solution',
-          mode,
-          clarity: r.clarity,
-          category: r.category,
-          clarity_desc: '',
-          content: r.content,
-          round,
-          checklist: r.checklist ?? [],
-          source_tags: r.source_tags ?? [],
-          notice: DEEP_FALLBACK_NOTICE,
-        });
-      } catch (e) {
-        return json(502, { error: '深度模式暂不可用', detail: (e as Error)?.message ?? String(e) });
-      }
-    }
+    let out: Record<string, unknown> | null = null;
     try {
-      const r = await deepRun(context);
-      return json(200, {
-        type: r.clarity <= 1 ? 'question' : 'solution',
-        mode,
-        clarity: r.clarity,
-        category: r.category,
-        clarity_desc: '',
-        content: r.content,
-        round,
-        checklist: [],
-        source_tags: [],
-      });
+      await runDeepChain(context, headers, scene, (ev) => {
+        if (ev.type === 'result') out = ev.result as unknown as Record<string, unknown>;
+      }, round ?? 1, { clarify: turnCount(sessionId ?? '') === 1 });
     } catch (e) {
       return json(502, { error: '深度模式暂不可用', detail: (e as Error)?.message ?? String(e) });
     }
+    if (!out) {
+      return json(502, { error: '深度模式暂不可用', detail: '五阶段链未产出结果' });
+    }
+    return json(200, out);
   }
 
   // 快速模式

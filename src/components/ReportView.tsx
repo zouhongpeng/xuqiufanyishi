@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Copy,
   Check,
-  Printer,
   Zap,
   Fingerprint,
   Circle,
@@ -14,9 +13,21 @@ import {
   XCircle,
   ShieldCheck,
   ImageDown,
+  FileText,
+  FileDown,
+  LayoutGrid,
+  Swords,
+  GitBranch,
+  ListChecks,
+  ShieldAlert,
 } from 'lucide-react';
 import { drawShareCard } from './shareCard';
+import { exportWideCard } from '@/lib/cardCanvas';
+import DebateView, { type DebateItem } from './DebateView';
+import NeedTree from './NeedTree';
+import PrintFrame from './PrintFrame';
 import { showToast } from './Toast';
+import type { StructuredReport, ClarifyQuestion } from '@/lib/deepChain';
 
 export type ReportMode = 'quick' | 'deep';
 
@@ -113,18 +124,24 @@ function priorityColor(priority?: string): { bg: string; text: string; label: st
   return { bg: 'rgba(173,181,189,0.16)', text: '#636B74', label: priority };
 }
 
-/* 行内 **bold** */
+/* 行内 **bold** 与 ~~删除线~~（正反交锋中被推翻结论） */
 function InlineText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(~~[^~]+~~|\*\*[^*]+\*\*)/g);
   return (
     <>
-      {parts.map((part, i) =>
-        part.startsWith('**') && part.endsWith('**') ? (
-          <strong key={i} className="font-bold text-[#1d1d1f]">{part.slice(2, -2)}</strong>
-        ) : (
-          <span key={i}>{part}</span>
-        ),
-      )}
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} className="font-bold text-[#1d1d1f]">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('~~') && part.endsWith('~~')) {
+          return (
+            <del key={i} className="text-[#86868b] line-through decoration-[#c7c7cc]">
+              {part.slice(2, -2)}
+            </del>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
     </>
   );
 }
@@ -142,7 +159,6 @@ interface Block {
 function parseMarkdown(src: string): Block[] {
   const lines = src.split('\n');
   const blocks: Block[] = [];
-  let listening = false;
   let items: string[] | null = null;
   let inTable = false;
   let table: string[][] = [];
@@ -223,7 +239,7 @@ function parseActionCard(text: string): {
   core: string;
 } {
   const { priority, rest } = extractPriorityFromText(text);
-  let body = (rest || text).replace(/^\s*[-*+]\s+/, '');
+  const body = (rest || text).replace(/^\s*[-*+]\s+/, '');
   let duration = '';
   const dur = body.match(/(?:预计|大概|耗时|用时)[：:]?\s*([\d.]+)\s*(小时|天|分钟|周|月|h)/i);
   if (dur) duration = `${dur[1]}${dur[2]}`;
@@ -263,6 +279,8 @@ export function ReportView({
   evidence = [],
   clarity,
   scene,
+  structured = null,
+  clarifications = [],
 }: {
   content: string;
   mode?: ReportMode;
@@ -272,6 +290,8 @@ export function ReportView({
   evidence?: EvidenceRef[];
   clarity?: number;
   scene?: string;
+  structured?: StructuredReport | null;
+  clarifications?: ClarifyQuestion[];
 }) {
   const blocks = useMemo(() => parseMarkdown(content), [content]);
   const listKey = useMemo(() => `req-decomposer:check:${hash(content)}`, [content]);
@@ -319,7 +339,11 @@ export function ReportView({
         title={blocks.find((b) => b.type === 'heading' && b.level === 1)?.text?.trim()}
         checklist={checklist}
         content={content}
+        structured={structured}
+        docNoStr={docNo(content)}
       />
+      {clarifications.length > 0 ? <ClarifyArchive items={clarifications} /> : null}
+      {structured ? <StructuredBento s={structured} /> : null}
       <Body blocks={blocks} checks={checks} onToggle={toggle} plagiarism={plagiarism} evidence={evidence} />
       {!hasRiskSection(blocks) && plagiarism ? (
         <div className="px-6 pb-2 sm:px-10">
@@ -327,7 +351,184 @@ export function ReportView({
         </div>
       ) : null}
       {checklist.length > 0 ? <ReviewChecklist items={checklist} /> : null}
+      <PrintFrame
+        full
+        title={blocks.find((b) => b.type === 'heading' && b.level === 1)?.text?.trim() || '项目拆解报告'}
+        date={new Date().toLocaleDateString('zh-CN')}
+        no={docNo(content)}
+        structured={structured}
+        reportText={content}
+      />
+      <PrintFrame
+        full={false}
+        title={blocks.find((b) => b.type === 'heading' && b.level === 1)?.text?.trim() || '项目拆解报告'}
+        date={new Date().toLocaleDateString('zh-CN')}
+        no={docNo(content)}
+        structured={structured}
+        reportText={content}
+      />
     </article>
+  );
+}
+
+/* 文档编号：内容 hash → ND-XXXXXX */
+function docNo(content: string): string {
+  return `ND-${hash(content).toUpperCase().padStart(7, '0').slice(0, 7)}`;
+}
+
+/* ---------- 澄清问答（需求档案前置区） ---------- */
+function ClarifyArchive({ items }: { items: ClarifyQuestion[] }) {
+  return (
+    <section className="border-b border-[#f0f0f2] px-6 py-6 sm:px-10">
+      <div className="mono-tag mb-2">CLARIFIED</div>
+      <h3 className="mb-3 text-[16px] font-semibold text-[#1d1d1f]">先问后拆 · 澄清问答</h3>
+      <div className="grid gap-2 sm:grid-cols-1">
+        {items.map((c, i) => (
+          <div key={i} className="rounded-2xl bg-[#f5f5f7] px-4 py-3">
+            <p className="text-[13.5px] font-medium text-[#1d1d1f]">
+              {String(i + 1).padStart(2, '0')}　{c.q}
+            </p>
+            {c.hint ? <p className="mt-1 text-[12.5px] leading-5 text-[#86868b]">追问提示：{c.hint}</p> : null}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[12px] text-[#86868b]">以上澄清问答已并入需求档案，作为本轮论证的前提。</p>
+    </section>
+  );
+}
+
+/* ---------- 结构化 Bento 区（核心结论主格 + 正反交锋 + 需求地图） ---------- */
+function StructuredBento({ s }: { s: StructuredReport }) {
+  const debate: DebateItem[] = (s.debate ?? []).map((d) => ({
+    topic: d.topic,
+    pro: d.pro,
+    con: d.con,
+    resolved: d.resolved,
+  }));
+  return (
+    <section className="border-b border-[#f0f0f2] px-4 py-6 sm:px-8">
+      <div className="bento-grid">
+        {/* 2x2 主格：核心结论 */}
+        <div className="bento bento-2x2 reveal flex flex-col justify-between">
+          <div>
+            <div className="mono-tag">KEY VERDICT</div>
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold"
+              style={{ background: 'rgba(0,113,227,0.1)', color: '#0071e3' }}>
+              <LayoutGrid className="h-3.5 w-3.5" />
+              核心结论
+            </div>
+            <p className="mt-3 text-[17px] font-semibold leading-relaxed text-[#1d1d1f]">
+              {s.card?.conclusion || s.summary}
+            </p>
+          </div>
+          <div className="mt-5 flex items-end gap-7">
+            <div>
+              <div className="bento-num text-[#1d1d1f]">{s.stages.length}</div>
+              <div className="mono-tag mt-1">阶段论证</div>
+            </div>
+            <div>
+              <div className="bento-num text-[#1d1d1f]">{s.actions.length}</div>
+              <div className="mono-tag mt-1">行动项</div>
+            </div>
+            <div>
+              <div className="bento-num text-[#e5484d]">{s.risks.length}</div>
+              <div className="mono-tag mt-1">风险</div>
+            </div>
+          </div>
+        </div>
+        {/* 五阶段速览格 */}
+        <div className="bento bento-2x1 reveal">
+          <div className="mono-tag mb-2">FIVE STAGES</div>
+          <div className="grid grid-cols-1 gap-1.5">
+            {s.stages.map((st, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="mono-tag mt-0.5 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                <span className="text-[13px] leading-5 text-[#1d1d1f]">
+                  <b>{st.name}</b>
+                  <span className="text-[#86868b]"> · {st.conclusion}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* 需求档案格 */}
+        <div className="bento reveal">
+          <div className="mono-tag mb-2">ARCHIVE</div>
+          <h4 className="text-[15px] font-semibold text-[#1d1d1f]">需求档案</h4>
+          <p className="mt-2 text-[13px] leading-6 text-[#6e6e73]">{s.summary}</p>
+          <div className="mt-2 space-y-1">
+            {Object.entries(s.archive ?? {}).slice(0, 6).map(([k, v]) => (
+              <p key={k} className="text-[12.5px] leading-5 text-[#6e6e73]">
+                <b className="text-[#1d1d1f]">{k}</b>：{v}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 正反交锋 */}
+      {debate.length > 0 ? (
+        <div className="mt-6 reveal">
+          <div className="mb-3 flex items-center gap-2">
+            <Swords className="h-4.5 w-4.5 text-[#0071e3]" strokeWidth={1.8} />
+            <h3 className="text-[18px] font-semibold text-[#1d1d1f]">正反交锋</h3>
+            <span className="mono-tag">DEBATE</span>
+          </div>
+          <DebateView items={debate} />
+        </div>
+      ) : null}
+
+      {/* 需求地图 */}
+      {s.tree?.label ? (
+        <div className="mt-6 reveal">
+          <div className="mb-3 flex items-center gap-2">
+            <GitBranch className="h-4.5 w-4.5 text-[#0071e3]" strokeWidth={1.8} />
+            <h3 className="text-[18px] font-semibold text-[#1d1d1f]">需求地图</h3>
+            <span className="text-[12px] text-[#86868b]">点击节点展开论证依据</span>
+          </div>
+          <NeedTree tree={s.tree} />
+        </div>
+      ) : null}
+
+      {/* 行动清单与风险结构化卡 */}
+      <div className="bento-grid mt-6">
+        <div className="bento bento-2x1 reveal">
+          <div className="mb-2 flex items-center gap-2">
+            <ListChecks className="h-4.5 w-4.5 text-[#0071e3]" strokeWidth={1.8} />
+            <h4 className="text-[15px] font-semibold text-[#1d1d1f]">行动清单</h4>
+            <span className="mono-tag">ACTIONS</span>
+          </div>
+          <div className="space-y-2">
+            {s.actions.map((a, i) => (
+              <div key={i} className="rounded-2xl bg-[#f5f5f7] px-4 py-3">
+                <p className="text-[13.5px] font-medium text-[#1d1d1f]">
+                  {String(i + 1).padStart(2, '0')}　{a.task}
+                </p>
+                <p className="mt-1 text-[11.5px] text-[#86868b]">
+                  {a.role ? `角色：${a.role}` : ''}
+                  {a.time ? ` ｜ 时间：${a.time}` : ''}
+                  {a.priority ? ` ｜ ${a.priority}` : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bento reveal">
+          <div className="mb-2 flex items-center gap-2">
+            <ShieldAlert className="h-4.5 w-4.5 text-[#e5484d]" strokeWidth={1.8} />
+            <h4 className="text-[15px] font-semibold text-[#1d1d1f]">风险与预案</h4>
+          </div>
+          <div className="space-y-2">
+            {s.risks.map((r, i) => (
+              <div key={i} className="rounded-2xl bg-[#fdf2f1] px-4 py-3">
+                <p className="text-[13px] font-semibold text-[#b0352b]">{r.risk}</p>
+                <p className="mt-0.5 text-[12.5px] leading-5 text-[#6e6e73]">应对：{r.response}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -341,6 +542,8 @@ function ReportHeader({
   title,
   checklist = [],
   content,
+  structured = null,
+  docNoStr,
 }: {
   mode?: ReportMode;
   onCopy: () => void;
@@ -351,9 +554,37 @@ function ReportHeader({
   title?: string;
   checklist?: ReviewItem[];
   content: string;
+  structured?: StructuredReport | null;
+  docNoStr: string;
 }) {
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState(false);
+  const printDoc = (full: boolean) => {
+    const cls = full ? 'print-mode-full' : 'print-mode-quick';
+    const other = full ? 'print-mode-quick' : 'print-mode-full';
+    document.body.classList.add(cls);
+    document.body.classList.remove(other);
+    const clean = () => {
+      document.body.classList.remove(cls, other);
+      window.removeEventListener('afterprint', clean);
+    };
+    window.addEventListener('afterprint', clean);
+    window.print();
+    setTimeout(clean, 2000);
+  };
+  const exportCard = () => {
+    try {
+      exportWideCard({
+        title: structured?.card?.title || title || '项目拆解报告',
+        summary: structured?.card?.conclusion || structured?.summary || title || '',
+        date: new Date().toLocaleDateString('zh-CN'),
+        no: docNoStr,
+      });
+      showToast('16:9 拆解卡已生成并开始下载');
+    } catch {
+      showToast('拆解卡生成失败，请重试');
+    }
+  };
   const exportShareCard = async () => {
     setExporting(true);
     try {
@@ -389,7 +620,28 @@ function ReportHeader({
             </span>
           ) : null}
         </div>
-        <div className="no-print flex items-center gap-2">
+        <div className="no-print flex flex-wrap items-center justify-end gap-2">
+          <button
+            onClick={() => printDoc(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#0071e3] px-3.5 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-[#0077ed] active:bg-[#0068d1]"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            完整版 PDF
+          </button>
+          <button
+            onClick={() => printDoc(false)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            速览版 PDF
+          </button>
+          <button
+            onClick={exportCard}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#0071e3] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            拆解卡 16:9
+          </button>
           <button
             onClick={exportShareCard}
             disabled={exporting}
@@ -418,13 +670,6 @@ function ReportHeader({
           >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? '已复制' : '一键复制'}
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="no-print inline-flex items-center gap-1.5 rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-colors hover:bg-[#f5f5f7] active:bg-[#ececf0]"
-          >
-            <Printer className="h-3.5 w-3.5" />
-            打印
           </button>
         </div>
       </div>

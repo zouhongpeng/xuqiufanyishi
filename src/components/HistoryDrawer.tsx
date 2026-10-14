@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Trash2, ChevronRight, History, ShieldCheck } from 'lucide-react';
+import { X, Trash2, ChevronRight, History, ShieldCheck, GitCompare } from 'lucide-react';
 import { ReportView } from '@/components/ReportView';
+import DiffView from '@/components/DiffView';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { showToast } from '@/components/Toast';
 import {
@@ -23,6 +24,7 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState<HistoryEntry | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<HistoryEntry | null>(null);
+  const [diffPair, setDiffPair] = useState<{ cur: HistoryEntry; prev: HistoryEntry } | null>(null);
 
   useEffect(() => {
     setList(loadHistory());
@@ -75,7 +77,24 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {detail ? (
+        {diffPair ? (
+          <div className="flex-1 overflow-y-auto p-4">
+            <button
+              onClick={() => setDiffPair(null)}
+              className="mb-3 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[13px] font-medium text-[#0071e3] shadow-[0_1px_4px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#f5f9ff]"
+            >
+              ← 返回列表
+            </button>
+            <div className="mb-3 rounded-[14px] border border-[#f0f0f2] bg-white px-4 py-3">
+              <p className="text-[13.5px] font-semibold text-[#1d1d1f]">{diffPair.cur.summary.slice(0, 60)}</p>
+              <p className="mt-1 text-[12px] text-[#86868b]">
+                新：{fmtTime(diffPair.cur.time)}（{diffPair.cur.mode === 'deep' ? '深度论证' : '快速预诊'}）
+                　vs　旧：{fmtTime(diffPair.prev.time)}（{diffPair.prev.mode === 'deep' ? '深度论证' : '快速预诊'}）
+              </p>
+            </div>
+            <DiffView oldText={diffPair.prev.content} newText={diffPair.cur.content} />
+          </div>
+        ) : detail ? (
           <div className="flex-1 overflow-y-auto p-4">
             <button
               onClick={() => setDetail(null)}
@@ -126,6 +145,16 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
                     </div>
                     <p className="mt-1 truncate text-[13.5px] text-[#1d1d1f]">{h.summary}</p>
                   </button>
+                  {list.indexOf(h) < list.length - 1 ? (
+                    <button
+                      onClick={() => setDiffPair({ cur: h, prev: list[list.indexOf(h) + 1] })}
+                      aria-label="与上一条对比差异"
+                      title="与上一条对比差异"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#c7c7cc] transition-colors hover:bg-[#f0f6ff] hover:text-[#0071e3]"
+                    >
+                      <GitCompare className="h-4 w-4" />
+                    </button>
+                  ) : null}
                   <button
                     onClick={() => setConfirmDelete(h)}
                     aria-label="删除该条记录"

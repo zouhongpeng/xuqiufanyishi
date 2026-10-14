@@ -30,8 +30,8 @@ export const LLM_CONFIG = {
     chatModel: process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat',
     /** 深度论证多视角与评委质询（reasoning_content 为思维链） */
     reasoningModel: process.env.DEEPSEEK_REASONING_MODEL || 'deepseek-reasoner',
-    /** 单次推理模型尝试的超时：超时或失败 → 降级 chat 模型 + 逐步推理提示 */
-    reasoningTimeoutMs: 60_000,
+    /** 单次推理模型尝试的超时：30 秒无输出即重试 1 次，再失败降级 chat 模型 */
+    reasoningTimeoutMs: 30_000,
     timeoutMs: 180_000,
   },
 } as const;
