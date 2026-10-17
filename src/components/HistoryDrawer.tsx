@@ -41,11 +41,12 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex justify-end bg-black/30 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-[#1d1d1f]/20 p-5 backdrop-blur-[7px] sm:p-12"
       onClick={onClose}
     >
       <div
-        className="fade-in flex h-full w-full max-w-xl flex-col bg-[#fbfbfd] shadow-[-16px_0_48px_rgba(0,0,0,0.10)]"
+        className="lg-card modal-pop flex h-[82vh] max-h-[760px] w-full max-w-[560px] flex-col !rounded-3xl"
+        style={{ background: 'rgba(251, 251, 253, 0.86)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#f0f0f2] px-5 py-4">
