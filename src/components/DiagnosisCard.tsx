@@ -38,18 +38,27 @@ export function DiagnosisCard({
         ) : null}
       </div>
 
-      {/* 清晰度可视化：3 个灯 */}
-      <div className="mt-3.5 flex items-center gap-1.5">
-        {[1, 2, 3].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-7 rounded-full transition-colors duration-300"
-            style={{ background: i <= point ? '#0071e3' : '#e8e8ed' }}
+      {/* 清晰度环形进度：每轮 +1 多填一段，3 分填满 */}
+      <div className="mt-3.5 flex items-center gap-2">
+        <svg width="34" height="34" viewBox="0 0 34 34" className="shrink-0" aria-label={`清晰度 ${point} / 3`}>
+          <circle cx="17" cy="17" r="13" fill="none" stroke="#e8e8ed" strokeWidth="4" />
+          <circle
+            cx="17"
+            cy="17"
+            r="13"
+            fill="none"
+            stroke="#0071e3"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeDasharray={`${((point / 3) * 2 * Math.PI * 13).toFixed(2)} ${(2 * Math.PI * 13).toFixed(2)}`}
+            transform="rotate(-90 17 17)"
+            style={{ transition: 'stroke-dasharray 600ms cubic-bezier(0.25, 0.1, 0.25, 1)' }}
           />
-        ))}
-        <span className="ml-1.5 text-[12px] text-[#86868b]">
-          清晰度 {point} / 3
-        </span>
+          <text x="17" y="21" textAnchor="middle" fontSize="9.5" fontWeight="600" fill="#1d1d1f">
+            {point}/3
+          </text>
+        </svg>
+        <span className="text-[12px] text-[#86868b]">清晰度 {point} / 3</span>
       </div>
 
       {nextQuestion ? (
