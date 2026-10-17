@@ -60,18 +60,14 @@ export function DiagnosisCard({
         <p className="mt-3.5 text-[13px] leading-[1.7] text-[#424245]">{clarity_desc}</p>
       ) : null}
 
-      {/* 缺失信息 */}
+      {/* 本轮聚焦：一次只围绕一个最关键缺失点提问，其余留到后续轮次 */}
       {missing_info.length > 0 ? (
         <div className="mt-4">
-          <div className="text-[12px] font-medium text-[#86868b]">还缺这些信息</div>
-          <ul className="mt-2 space-y-1.5">
-            {missing_info.map((info, i) => (
-              <li key={i} className="flex items-start gap-2 text-[13px] leading-6 text-[#424245]">
-                <span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-[#0071e3]/60" />
-                {info}
-              </li>
-            ))}
-          </ul>
+          <div className="text-[12px] font-medium text-[#86868b]">本轮先聚焦</div>
+          <p className="mt-2 flex items-start gap-2 text-[13px] leading-6 text-[#424245]">
+            <span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-[#0071e3]/60" />
+            {missing_info[0]}
+          </p>
         </div>
       ) : null}
 
