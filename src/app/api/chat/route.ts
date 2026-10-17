@@ -241,6 +241,7 @@ interface DeepLLMResult {
   clarity: number;
   category: string;
   content: string;
+  ack?: string;
   checklist?: unknown[];
   source_tags?: unknown[];
   plagiarism?: unknown;
@@ -255,7 +256,7 @@ async function deepViaLLM(
 ): Promise<DeepLLMResult> {
   const j = await judge(context, headers, scene);
   if (j.clarity <= 1) {
-    return { clarity: j.clarity, category: j.category, content: j.next_question };
+    return { clarity: j.clarity, category: j.category, content: j.next_question, ack: j.ack };
   }
   const rep = await decomposeReport(context, headers, j.category, scene);
   return {
@@ -285,6 +286,7 @@ function wPublish(
       clarity: r.clarity,
       category: r.category,
       clarity_desc: '',
+      ack: r.ack,
       content: r.content,
       round,
       checklist: r.checklist ?? [],
@@ -371,6 +373,7 @@ function questionPayload(judgement: Judgement, round?: number) {
     mode: 'quick' as const,
     clarity: judgement.clarity,
     category: judgement.category,
+    ack: judgement.ack,
     clarity_desc: judgement.clarity_desc,
     missing_info: judgement.missing_info,
     options: judgement.options,
