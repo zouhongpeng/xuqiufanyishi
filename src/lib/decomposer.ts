@@ -43,6 +43,7 @@ const JUDGE_SYSTEM = `你是一个严格的评委，用评委视角审视用户�
 {
   "clarity": 0-3的数字,
   "category": "场景分类",
+  "ack": "先用1-3句自然口语回应用户刚才说的话（复述理解到的想法核心+简短点评），不提问无emoji",
   "clarity_desc": "哪些已经明确，哪些还不明确",
   "missing_info": ["缺失的关键信息1", "缺失的关键信息2"],
   "next_question": "clarity≤1时给出追问，评委口吻，2-3句话，无emoji不列点；clarity≥2时输出空字符串",
@@ -53,6 +54,9 @@ const JUDGE_SYSTEM = `你是一个严格的评委，用评委视角审视用户�
 - 禁止一轮里同时问多个问题：不得出现「另外」「还有」「顺便」等并列追问，也不得连续出现两个问号；
 - 其余缺失信息不要在这轮提出，留到后续轮次根据用户最新回答逐个追问；
 - 用户回答本轮问题后，下一轮再问下一条最关键的缺失信息，直到 clarity≥2。
+关于 ack（先回应、像正常聊天）：
+- ack 是你开口说的第一句话：先用 1-3 句自然口语回应用户刚才说的话——复述你理解到的想法核心，肯定亮点或直接点出最明显的问题，像真人聊天一样；
+- ack 里不要提问、不要列点、无 emoji；提问只放在 next_question 里。
 关于 options：仅当 clarity≤1 时生成 2-4 个可点选项，让用户一点即可补充最关键信息（如问投入时间则给出 [0-2小时][2-10小时][10小时以上]）；label 是可直接发送的简短选项，hint 给出补充说明；clarity≥2 时 options 输出空数组。
 `;
 
@@ -150,6 +154,7 @@ export interface DiagnosticOption {
 export interface Judgement {
   clarity: number;
   category: string;
+  ack: string;
   clarity_desc: string;
   missing_info: string[];
   next_question: string;
@@ -316,6 +321,7 @@ export async function judge(
     return {
       clarity,
       category: typeof parsed.category === 'string' ? parsed.category : '其他',
+      ack: typeof parsed.ack === 'string' ? parsed.ack.trim() : '',
       clarity_desc,
       missing_info,
       next_question: nextQuestion,
