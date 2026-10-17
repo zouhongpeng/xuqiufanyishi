@@ -593,12 +593,13 @@ body {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   pointer-events: none;
-  animation: sphere-float 9s ease-in-out infinite alternate;
+  /* 固定在正中央：去掉上下浮动动画 */
+  /* animation: sphere-float 9s ease-in-out infinite alternate; */
 }
-@keyframes sphere-float {
+/* @keyframes sphere-float {
   from { transform: translate(-50%, calc(-50% - 6px)); }
   to   { transform: translate(-50%, calc(-50% + 6px)); }
-}
+} */
 .lg-orbit-item {
   position: absolute;
   left: 50%;
