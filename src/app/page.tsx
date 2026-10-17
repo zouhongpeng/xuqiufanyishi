@@ -572,7 +572,7 @@ export default function Home() {
           input={input}
           onInput={setInput}
           onSend={() => handleSend()}
-          onFill={(t) => setInput(t)}
+          onFill={(t) => handleSend(t)}
         />
       ) : (
         <ChatStage
@@ -667,6 +667,7 @@ function HeroStage({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [openFeat, setOpenFeat] = useState<OrbitFeature | null>(null);
   const [kbOpen, setKbOpen] = useState(false);
+  const [inspOpen, setInspOpen] = useState(false); // 案例灵感面板：点击也可展开/收起
 
   useEffect(() => {
     const el = taRef.current;
@@ -758,18 +759,21 @@ function HeroStage({
       {/* 右下角：案例灵感 + 模式说明（悬停阻尼展开，移开折叠） */}
       <div className="absolute bottom-4 right-5 z-30 hidden lg:block">
         <div className="group lg-pill rounded-2xl shadow-[0_8px_28px_rgba(31,41,55,0.10)]">
-          <button className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-[12px] font-medium text-[#1d1d1f]">
+          <button
+            onClick={() => setInspOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-[12px] font-medium text-[#1d1d1f]"
+          >
             <span className="inline-flex items-center gap-1.5">
               <Brain className="h-3.5 w-3.5 text-[#0071e3]" />
               案例灵感
             </span>
             <ChevronDown
-              className="h-3.5 w-3.5 text-[#86868b] transition-transform duration-500 group-hover:rotate-180"
+              className={`h-3.5 w-3.5 text-[#86868b] transition-transform duration-500 group-hover:rotate-180 ${inspOpen ? 'rotate-180' : ''}`}
               style={{ transitionTimingFunction: 'var(--spring)' }}
             />
           </button>
           <div
-            className="max-h-0 overflow-hidden px-3 opacity-0 transition-all duration-500 group-hover:max-h-64 group-hover:opacity-100 group-hover:pb-3"
+            className={`max-h-0 overflow-hidden px-3 opacity-0 transition-all duration-500 group-hover:max-h-64 group-hover:opacity-100 group-hover:pb-3 ${inspOpen ? 'max-h-64 pb-3 opacity-100' : ''}`}
             style={{ transitionTimingFunction: 'var(--damp)' }}
           >
             <div className="flex flex-col items-start gap-1.5">
