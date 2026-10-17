@@ -14,14 +14,20 @@ import {
   X,
   Brain,
   History,
+  MessageCircleQuestion,
+  Swords,
+  GitBranch,
+  ListChecks,
+  ShieldAlert,
 } from 'lucide-react';
 import { ReportView, type ReviewItem, type PlagiarismHint, type EvidenceRef } from '@/components/ReportView';
 import type { StructuredReport, ClarifyQuestion } from '@/lib/deepChain';
 import { DiagnosisCard, type DiagnosticOption } from '@/components/DiagnosisCard';
-import BentoHome from '@/components/BentoHome';
 import { ReportSkeleton } from '@/components/Skeleton';
 import { useReveal } from '@/lib/useReveal';
 import KnowledgeDrawer from '@/components/KnowledgeDrawer';
+import GlassCard from '@/components/GlassCard';
+import OrbitRing, { ORBIT_FEATURES, type OrbitFeature } from '@/components/OrbitRing';
 import HistoryDrawer from '@/components/HistoryDrawer';
 import Toast from '@/components/Toast';
 import { addHistory, type HistoryEntry } from '@/lib/history';
@@ -528,11 +534,9 @@ export default function Home() {
   }
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden bg-[#f5f5f7] text-[#1d1d1f]">
-      <div
-        className="hero-glow"
-        style={{ top: '-200px', left: '50%', transform: 'translateX(-50%)' }}
-      />
+    <div className="relative flex h-dvh flex-col overflow-hidden text-[#1d1d1f]">
+      {/* 液态极光背景 */}
+      <div className="lg-aurora" />
       {/* 顶部极简导航 */}
       <nav className="app-nav glass no-print z-20 flex h-14 shrink-0 items-center justify-between border-b border-[#f0f0f2] px-5 sm:px-8">
         <button onClick={startNew} className="text-[17px] font-semibold tracking-tight">
@@ -591,6 +595,8 @@ export default function Home() {
           onSend={() => handleSend()}
           onPick={handleSend}
           onStop={stopAnalysis}
+          onNew={startNew}
+          onHistory={() => setHistOpen(true)}
         />
       )}
     </div>
@@ -599,28 +605,33 @@ export default function Home() {
 
 /* ==================== 模式分段开关 ==================== */
 function ModeSwitch({ value, onChange }: { value: Mode; onChange: (m: Mode) => void }) {
+  const opts = [
+    { k: 'quick', label: '⚡ 快速预诊' },
+    { k: 'deep', label: '🔬 深度论证' },
+  ] as const;
+  const idx = value === 'deep' ? 1 : 0;
   return (
-    <div className="relative flex items-center rounded-full bg-[#f5f5f7] p-[3px]">
-      {(
-        [
-          { k: 'quick', label: '⚡ 快速预诊' },
-          { k: 'deep', label: '🔬 深度论证' },
-        ] as const
-      ).map((it) => {
+    <div className="lg-pill relative flex items-center rounded-full p-[3px]">
+      {/* 果冻滑块：弹簧曲线滑动 */}
+      <span
+        aria-hidden
+        className="absolute bottom-[3px] left-[3px] top-[3px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.14)]"
+        style={{
+          width: 'calc(50% - 3px)',
+          transform: `translateX(${idx * 100}%)`,
+          transition: 'transform 380ms var(--spring)',
+        }}
+      />
+      {opts.map((it) => {
         const active = value === it.k;
         return (
           <button
             key={it.k}
             onClick={() => onChange(it.k)}
-            className="relative z-10 rounded-full px-3.5 py-1 text-[12.5px] font-medium transition-[color,box-shadow] duration-300"
-            style={{
-              color: active ? '#1d1d1f' : '#86868b',
-              transform: active ? 'scale(1)' : 'none',
-            }}
+            className={`relative z-10 flex-1 whitespace-nowrap rounded-full px-3.5 py-1 text-[12.5px] transition-colors duration-300 ${
+              active ? 'font-semibold text-[#1d1d1f]' : 'text-[#86868b] hover:text-[#1d1d1f]'
+            }`}
           >
-            {active && (
-              <span className="absolute inset-0 -z-10 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.12)]" />
-            )}
             {it.label}
           </button>
         );
@@ -654,45 +665,65 @@ function HeroStage({
   onFill: (t: string) => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const [openFeat, setOpenFeat] = useState<OrbitFeature | null>(null);
+  const [kbOpen, setKbOpen] = useState(false);
+
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenFeat(null);
+        setKbOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const handleOrbitItem = (f: OrbitFeature) => {
+    if (f.id === 'kb') setKbOpen(true);
+    else setOpenFeat(f);
+  };
+
   return (
-    <div className="fade-in relative z-10 flex flex-1 flex-col items-center overflow-y-auto px-5 py-8 sm:px-6">
-      <div className="w-full max-w-3xl text-center">
-        {/* 品牌区 */}
+    <div className="fade-in relative z-10 flex flex-1 flex-col overflow-y-auto px-4 sm:px-6 lg:overflow-hidden">
+      {/* 顶部标题区（不遮挡主体） */}
+      <div className="pointer-events-none relative z-20 mx-auto w-full max-w-7xl pt-1.5 text-center">
         <div className="mono-tag">NEED DECOMPOSER</div>
-        <h1 className="mt-2 max-w-4xl text-[36px] font-bold leading-[1.12] tracking-tight text-[#1d1d1f] sm:text-[52px]">
+        <h1 className="mt-1 text-[19px] font-bold tracking-tight sm:text-[23px]">
           像评委一样，审视你的每一个项目想法
         </h1>
-        <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[#86868b] sm:text-[17px]">
-          需求拆解师：输入你的项目创意，先问后拆，按科创赛评审标准逐项核验，出整改行动方案。
+        <p className="mt-0.5 text-[12px] text-[#86868b] sm:text-[12.5px]">
+          输入项目创意，先问后拆，按科创赛评审标准逐项核验，出整改行动方案
         </p>
+      </div>
 
-        <div className="mt-8">
-          {/* 场景胶囊 */}
-          <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
-            {SCENES.map((s) => (
-              <button
-                key={s}
-                onClick={() => onScene(s)}
-                className={`rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
-                  s === scene
-                    ? 'border-[#0071e3] bg-white font-medium text-[#0071e3]'
-                    : 'border-[#e8e8ed] bg-white text-[#86868b] hover:text-[#1d1d1f]'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+      <div className="relative mx-auto flex w-full max-w-7xl flex-1 flex-col items-center justify-center lg:min-h-0">
+        {/* 中央玻璃球体（装饰） */}
+        <div className="lg-sphere" />
 
-          {/* 输入卡片 */}
-          <div className="rounded-[20px] border border-[#e8e8ed] bg-white p-3 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.06)] transition-all duration-150 focus-within:border-[#0071e3] focus-within:ring-4 focus-within:ring-[#0071e3]/10">
+        {/* 星环：功能卡绕球旋转，拖拽流转 */}
+        <div className="absolute inset-0 z-10 hidden lg:block">
+          <OrbitRing onItem={handleOrbitItem} />
+        </div>
+
+        {/* 中央主功能：只保留场景标签 + 输入（尺寸贴合球体） */}
+        <div className="pointer-events-none relative z-20 flex w-full max-w-[336px] flex-col items-center text-center">
+          <button
+            onClick={() => onScene('科创赛诊断')}
+            className="lg-pill pointer-events-auto mb-2.5 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-[12px] font-medium text-[#0071e3]"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+            科创赛诊断
+          </button>
+
+          <div className="lg-input pointer-events-auto w-full p-2">
             <textarea
               ref={taRef}
               value={input}
@@ -706,51 +737,131 @@ function HeroStage({
               rows={2}
               maxLength={2000}
               placeholder="输入你的项目想法，越具体越好…"
-              className="w-full resize-none bg-transparent px-2 py-2 text-[16px] leading-7 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
+              className="w-full resize-none bg-transparent px-2 py-1 text-[13.5px] leading-5 text-[#1d1d1f] outline-none placeholder:text-[#c7c7cc]"
             />
-            <div className="flex items-center justify-between px-2 pb-1">
-              <span className="text-[11.5px] tabular-nums text-[#c7c7cc]">{input.length}/2000</span>
+            <div className="flex items-center justify-between px-1.5 pb-0.5">
+              <span className="text-[10.5px] tabular-nums text-[#c7c7cc]">{input.length}/2000</span>
               <button
                 onClick={onSend}
                 disabled={!input.trim()}
-                className="press inline-flex items-center gap-1.5 rounded-full bg-[#0071e3] px-5 py-2 text-[14px] font-medium text-white transition-all duration-150 hover:bg-[#0077ed] active:bg-[#0068d1] disabled:cursor-not-allowed disabled:opacity-30"
+                className="jelly inline-flex items-center gap-1 rounded-full bg-[#0071e3] px-3.5 py-1 text-[12.5px] font-medium text-white shadow-[0_6px_18px_rgba(0,113,227,0.35)] transition-all duration-200 hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
                 aria-label="开始评审"
               >
-                <Send className="h-4 w-4" />
+                <Send className="h-3 w-3" />
                 开始评审
               </button>
             </div>
           </div>
-
-          {/* 示例一键填入 */}
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            {HERO_EXAMPLES.map((t) => (
-              <button
-                key={t}
-                onClick={() => onFill(t)}
-                className="press rounded-full border border-[#e8e8ed] bg-white px-3.5 py-1.5 text-[12.5px] text-[#86868b] transition-colors hover:border-[#0071e3] hover:text-[#0071e3]"
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <ModeTip mode={mode} />
         </div>
       </div>
 
-      {/* Bento 功能介绍区 */}
-      <div className="mt-10 w-full max-w-3xl">
-        <BentoHome
-          rulesCount={KB_RULES.length}
-          casesCount={KB_CASES.length}
-          boundariesCount={KB_BOUNDARIES.length}
-          onExample={onFill}
-        />
+      {/* 右下角：案例灵感 + 模式说明（悬停阻尼展开，移开折叠） */}
+      <div className="absolute bottom-4 right-5 z-30 hidden lg:block">
+        <div className="group lg-pill rounded-2xl shadow-[0_8px_28px_rgba(31,41,55,0.10)]">
+          <button className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-[12px] font-medium text-[#1d1d1f]">
+            <span className="inline-flex items-center gap-1.5">
+              <Brain className="h-3.5 w-3.5 text-[#0071e3]" />
+              案例灵感
+            </span>
+            <ChevronDown
+              className="h-3.5 w-3.5 text-[#86868b] transition-transform duration-500 group-hover:rotate-180"
+              style={{ transitionTimingFunction: 'var(--spring)' }}
+            />
+          </button>
+          <div
+            className="max-h-0 overflow-hidden px-3 opacity-0 transition-all duration-500 group-hover:max-h-64 group-hover:opacity-100 group-hover:pb-3"
+            style={{ transitionTimingFunction: 'var(--damp)' }}
+          >
+            <div className="flex flex-col items-start gap-1.5">
+              {HERO_EXAMPLES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => onFill(t)}
+                  className="jelly w-full rounded-xl border border-white/70 bg-white/60 px-2.5 py-1.5 text-left text-[11.5px] leading-snug text-[#6e6e73] transition-colors hover:text-[#0071e3]"
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2.5 border-t border-[#e8e8ed]/60 pt-2 text-left text-[11px] leading-relaxed text-[#86868b]">
+              {mode === 'deep' ? '🔬 深度论证：约 30-60 秒，评审团多视角核验' : '⚡ 快速预诊：聚焦清晰度与关键缺口的快速评审'}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* 知识库背书 + 雷区警示榜 */}
-      <KbFooter />
+      {/* 移动端：横滑卡片条 */}
+      <div className="mt-4 flex gap-3 overflow-x-auto pb-1 lg:hidden">
+        {ORBIT_FEATURES.map((f) => (
+          <OrbitCard key={f.id} f={f} onOpen={() => handleOrbitItem(f)} />
+        ))}
+      </div>
+
+      {/* 功能详情弹窗 */}
+      {openFeat && <FeatureModal feature={openFeat} onClose={() => setOpenFeat(null)} />}
+      {kbOpen && <KnowledgeDrawer onClose={() => setKbOpen(false)} />}
+    </div>
+  );
+}
+
+function OrbitCard({ f, onOpen, compact }: { f: OrbitFeature; onOpen: () => void; compact?: boolean }) {
+  return (
+    <GlassCard
+      className={`bento cursor-pointer select-none ${compact ? 'w-44 shrink-0 !p-4' : '!p-4.5'}`}
+      tilt={5}
+      scale={1.05}
+      onClick={onOpen}
+    >
+      <div className="flex items-center gap-2.5">
+        <div
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: `${f.accent}14`, boxShadow: `inset 0 0 0 1px ${f.accent}22` }}
+        >
+          <f.icon className="h-4.5 w-4.5" style={{ color: f.accent }} strokeWidth={1.8} />
+        </div>
+        <div className="min-w-0">
+          <div className="mono-tag">{f.tag}</div>
+          <h4 className="truncate text-[14.5px] font-semibold text-[#1d1d1f]">{f.title}</h4>
+        </div>
+      </div>
+      <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-[#6e6e73]">{f.desc}</p>
+    </GlassCard>
+  );
+}
+
+function FeatureModal({ feature, onClose }: { feature: OrbitFeature; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-5" role="dialog" aria-modal="true">
+      {/* 遮罩：点击窗外退出 */}
+      <div className="fade-in absolute inset-0 bg-[#1d1d1f]/25 backdrop-blur-[6px]" onClick={onClose} />
+      <div className="relative w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <GlassCard className="p-7 sm:p-8" tilt={0} scale={1}>
+          <button
+            onClick={onClose}
+            aria-label="关闭"
+            className="jelly absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full text-[#86868b] transition-all hover:bg-black/5 hover:text-[#1d1d1f]"
+          >
+            <X className="h-4.5 w-4.5" />
+          </button>
+          <div
+            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl"
+            style={{ backgroundColor: `${feature.accent}14`, boxShadow: `inset 0 0 0 1px ${feature.accent}22` }}
+          >
+            <feature.icon className="h-6 w-6" style={{ color: feature.accent }} strokeWidth={1.8} />
+          </div>
+          <div className="mono-tag mt-4">{feature.tag}</div>
+          <h3 className="mt-1 text-xl font-bold tracking-tight text-[#1d1d1f]">{feature.title}</h3>
+          <p className="mt-2.5 text-[14px] leading-relaxed text-[#6e6e73]">{feature.desc}</p>
+          <ul className="mt-4 space-y-2.5">
+            {feature.points.map((pt) => (
+              <li key={pt} className="flex items-start gap-2 text-[13.5px] text-[#3a3a3e]">
+                <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: feature.accent }} strokeWidth={2.2} />
+                {pt}
+              </li>
+            ))}
+          </ul>
+        </GlassCard>
+      </div>
     </div>
   );
 }
@@ -760,84 +871,6 @@ function ModeTip({ mode }: { mode: Mode }) {
     <p className="mt-3 text-[13px] text-[#86868b]">
       {mode === 'deep' ? '🔬 开始深度论证（约30-60秒）· 评审团将多视角核验' : '聚焦清晰度与关键缺口的快速评审'}
     </p>
-  );
-}
-
-/* 知识库背书 + 雷区警示榜 */
-function KbFooter() {
-  const [open, setOpen] = useState(false);
-  const [kbOpen, setKbOpen] = useState(false);
-  return (
-    <div className="mt-10 w-full max-w-3xl no-print">
-      {kbOpen && <KnowledgeDrawer onClose={() => setKbOpen(false)} />}
-      <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12px] text-[#c7c7cc]">
-        <span className="inline-flex items-center gap-1.5">
-          <BookOpen className="h-3.5 w-3.5" />评审规则库
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <ShieldCheck className="h-3.5 w-3.5" />往届案例库
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Fingerprint className="h-3.5 w-3.5" />能力边界库
-        </span>
-        <span>
-          | 收录{KB_RULES.length}条评审规则 · {KB_CASES.length}个往届案例 · {KB_BOUNDARIES.length}项能力边界评估
-        </span>
-        <button
-          onClick={() => setKbOpen(true)}
-          className="inline-flex items-center gap-1 rounded-full border border-[#ececf0] bg-white px-2.5 py-1 text-[12px] text-[#0071e3] transition-colors hover:bg-[#f5f9ff]"
-        >
-          <BookOpen className="h-3 w-3" />
-          知识库说明
-        </button>
-      </div>
-
-      <div className="mx-auto mt-4 max-w-xl">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
-        >
-          <CircleAlert className="h-3.5 w-3.5 text-[#e8a33d]" />
-          雷区警示榜
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
-        </button>
-        {open && (
-          <>
-            <button
-              onClick={() => setOpen(false)}
-              aria-label="收起雷区警示榜"
-              className="no-print fixed right-6 top-6 z-[500] flex h-11 w-11 items-center justify-center rounded-full border border-[#ececf0] bg-white text-[#86868b] shadow-[0_4px_24px_rgba(0,0,0,0.12)] transition-all hover:scale-105 hover:text-[#1d1d1f]"
-            >
-              <X className="h-5 w-5" />
-            </button>
-            <div className="fade-in mt-1 grid gap-2 rounded-[16px] border border-[#f0f0f2] bg-[#fbfbfd] p-4 text-left">
-              <p className="text-[12px] text-[#86868b]">
-                以下方向在往届科创赛中已高度饱和，直接做容易撞车，需要差异化。
-              </p>
-            {RED_SEA_CASES.map((c) => (
-              <div
-                key={c.id}
-                className="rounded-xl border border-[#f0f0f2] bg-white px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.03)]"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[11px] font-medium" style={{ background: 'rgba(232,163,61,0.14)', color: '#B45309' }}>
-                    {c.seaStatus === '红海' ? '红海' : '拥挤'} · {c.domain}
-                  </span>
-                  <span className="text-[13px] font-semibold text-[#1d1d1f]">{c.name}</span>
-                </div>
-                <p className="mt-1 text-[12.5px] leading-5 text-[#86868b]">
-                  {c.redSea}
-                </p>
-                <p className="mt-0.5 text-[12.5px] leading-5 text-[#0071e3]">
-                  差异化建议：{c.differentiation}
-                </p>
-              </div>
-            ))}
-            </div>
-            </>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -862,6 +895,8 @@ function ChatStage({
   onSend,
   onPick,
   onStop,
+  onNew,
+  onHistory,
 }: {
   mode: Mode;
   messages: ChatMsg[];
@@ -882,7 +917,10 @@ function ChatStage({
   onSend: () => void;
   onPick: (t: string) => void;
   onStop: () => void;
+  onNew: () => void;
+  onHistory: () => void;
 }) {
+  const [confirmExit, setConfirmExit] = useState(false);
   const replying = loading && mode === 'deep';
   const chatTaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -893,11 +931,49 @@ function ChatStage({
   }, [input]);
   return (
     <>
+    <div className="no-print fixed inset-0 z-40 flex items-center justify-center bg-[#1d1d1f]/15 p-8 backdrop-blur-[6px] sm:p-10">
       <div
-        ref={scrollRef}
-        data-chat-scroll
-        className="no-print mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 overflow-y-auto px-5 py-6 sm:px-6"
+        className="lg-card modal-pop flex h-full max-h-[calc(100vh-80px)] w-full max-w-[760px] flex-col overflow-hidden"
+        style={{ background: 'rgba(251, 251, 253, 0.92)' }}
       >
+        {/* 窗口头：对话式游戏标题栏 */}
+        <div className="flex shrink-0 items-center justify-between border-b border-white/70 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <div
+              className="inline-flex h-8 w-8 items-center justify-center rounded-xl"
+              style={{ background: 'rgba(0,113,227,0.10)', boxShadow: 'inset 0 0 0 1px rgba(0,113,227,0.18)' }}
+            >
+              <Brain className="h-4 w-4 text-[#0071e3]" />
+            </div>
+            <div className="text-left">
+              <div className="text-[14px] font-semibold leading-tight text-[#1d1d1f]">拆解师 · 评审对话</div>
+              <div className="text-[10.5px] text-[#86868b]">{mode === 'deep' ? '🔬 深度论证 · 评审团多视角' : '⚡ 快速预诊'}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onHistory} className="jelly lg-pill rounded-full px-3 py-1 text-[12px] text-[#1d1d1f]">
+              历史
+            </button>
+            <button
+              onClick={onNew}
+              className="jelly rounded-full bg-[#0071e3] px-3 py-1 text-[12px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.3)] transition-all hover:bg-[#0077ed]"
+            >
+              ＋ 新需求
+            </button>
+            <button
+              onClick={() => setConfirmExit(true)}
+              aria-label="退出评审"
+              className="jelly inline-flex h-7 w-7 items-center justify-center rounded-full text-[#86868b] transition-colors hover:bg-[#ffeceb] hover:text-[#e5484d]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div
+          ref={scrollRef}
+          data-chat-scroll
+          className="flex min-h-0 w-full flex-1 flex-col gap-5 overflow-y-auto px-5 py-5 sm:px-6"
+        >
         {messages.map((m) => (
           <MessageRow key={m.id} msg={m} onPick={onPick} />
         ))}
@@ -936,7 +1012,7 @@ function ChatStage({
       </div>
 
       {/* 底部输入 */}
-      <div className="msg-input no-print z-20 shrink-0 border-t border-[#f0f0f2] px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-3 sm:px-6">
+      <div className="no-print shrink-0 border-t border-white/70 px-5 pb-3 pt-3 sm:px-6">
         <div className="mx-auto w-full max-w-3xl">
           {messages.length <= 1 && (
             <div className="mb-3 flex flex-wrap gap-2">
@@ -988,7 +1064,82 @@ function ChatStage({
           </div>
         </div>
       </div>
+      </div>
+    </div>
+
+      {/* 退出确认：玻璃小弹窗，外面模糊；不是=左(笑脸) 是的=右(哭脸) */}
+      {confirmExit && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-[#1d1d1f]/20 p-6 backdrop-blur-[6px]"
+          onClick={() => setConfirmExit(false)}
+        >
+          <div
+            className="lg-card modal-pop w-full max-w-[340px] p-6 text-center"
+            style={{ background: 'rgba(251, 251, 253, 0.92)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[15px] font-semibold text-[#1d1d1f]">退出评审？</p>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-[#86868b]">
+              退出后将不保存本次评审进度
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              {/* 不是（左）→ 笑脸 */}
+              <div className="group relative">
+                <span
+                  className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-full bg-white/95 px-3 py-1 text-[13px] text-[#34C759] shadow-[0_4px_14px_rgba(0,0,0,0.12)] opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100"
+                  style={{ transitionTimingFunction: 'var(--spring)' }}
+                >
+                  (´▽`) 一起拆完吧！
+                </span>
+                <button
+                  onClick={() => setConfirmExit(false)}
+                  className="jelly rounded-full border border-[#e8e8ed] bg-white/80 px-5 py-2 text-[13.5px] font-medium text-[#1d1d1f] transition-colors hover:bg-white"
+                >
+                  不是
+                </button>
+              </div>
+              {/* 是的（右）→ 哭脸 */}
+              <div className="group relative">
+                <span
+                  className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-full bg-white/95 px-3 py-1 text-[13px] text-[#e5484d] shadow-[0_4px_14px_rgba(0,0,0,0.12)] opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100"
+                  style={{ transitionTimingFunction: 'var(--spring)' }}
+                >
+                  (╥﹏╥) 进度会没掉的…
+                </span>
+                <button
+                  onClick={() => {
+                    setConfirmExit(false);
+                    onNew();
+                  }}
+                  className="jelly rounded-full bg-[#e5484d] px-5 py-2 text-[13.5px] font-medium text-white transition-colors hover:bg-[#d93a3f]"
+                >
+                  是的，退出
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+function AiAvatar() {
+  return (
+    <div
+      className="no-print inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+      style={{ background: 'rgba(0,113,227,0.10)', boxShadow: 'inset 0 0 0 1px rgba(0,113,227,0.18)' }}
+    >
+      <Brain className="h-4 w-4 text-[#0071e3]" />
+    </div>
+  );
+}
+
+function UserAvatar() {
+  return (
+    <div className="no-print inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/85 text-[12px] font-semibold text-[#0071e3] shadow-[inset_0_0_0_1px_rgba(0,113,227,0.18)]">
+      我
+    </div>
   );
 }
 
@@ -1049,7 +1200,8 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
   // 先问后拆：澄清问题卡（回答后进入完整论证）
   if (msg.role === 'ai' && !msg.report && msg.clarifications && msg.clarifications.length > 0) {
     return (
-      <div className="flex w-full justify-start">
+      <div className="flex w-full items-start justify-start gap-2">
+        <AiAvatar />
         <div className="w-full max-w-[85%]">
           <div className="mb-1 text-[11px] font-medium text-[#86868b] no-print">🔬 深度论证 · 先问后拆</div>
           <div className="rounded-[20px] border border-[#e8e8ed] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.06)]">
@@ -1065,7 +1217,8 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
   // 追问诊断卡片
   if (msg.role === 'ai' && !msg.report && msg.options && msg.options.length > 0) {
     return (
-      <div className="flex w-full justify-start">
+      <div className="flex w-full items-start justify-start gap-2">
+        <AiAvatar />
         <div className="max-w-[85%]">
           {msg.notice && (
             <div className="mb-2 rounded-[12px] bg-[#f5f5f7] px-3.5 py-2 text-[12px] leading-5 text-[#86868b]">
@@ -1087,8 +1240,9 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
   }
 
   return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={isUser ? 'max-w-[78%]' : 'flex max-w-[78%] flex-col items-start'}>
+    <div className={`flex w-full items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {!isUser && <AiAvatar />}
+      <div className={isUser ? 'max-w-[74%]' : 'flex max-w-[74%] flex-col items-start'}>
         {!isUser && (
           <div className="mb-1 text-[11px] font-medium text-[#86868b] no-print">
             {msg.mode === 'deep' ? '🔬 深度论证' : '⚡ 快速预诊'}
@@ -1108,59 +1262,99 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
         >
           {msg.content}
         </div>
+        {isUser && <UserAvatar />}
       </div>
     </div>
   );
 }
 
-/* ---------- 先问后拆：澄清问答表单 ---------- */
+/* ---------- 先问后拆：逐题对话（一次只问一题，像游戏选项一样推进） ---------- */
 function ClarifyForm({ items, onSend }: { items: ClarifyQuestion[]; onSend: (t: string) => void }) {
+  const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
-  const filled = items.every((_, i) => (answers[i] ?? '').trim());
-  const send = (skip: boolean) => {
-    if (skip) {
-      onSend('信息已足够，直接开始深度论证。');
-      return;
+  const [typed, setTyped] = useState('');
+  const last = idx === items.length - 1;
+  const c = items[idx];
+
+  const advance = (answer: string) => {
+    const next = { ...answers, [idx]: answer };
+    setAnswers(next);
+    setTyped('');
+    if (last) {
+      const all = items
+        .map((cc, i) => `${cc.q}\n我的回答：${(next[i] ?? '').trim() || '（未回答）'}`)
+        .join('\n');
+      onSend(`【澄清回答】\n${all}\n请基于以上回答开始完整深度论证。`);
+    } else {
+      setIdx(idx + 1);
     }
-    if (!filled) return;
-    const text = items
-      .map((c, i) => `${c.q}\n我的回答：${(answers[i] ?? '').trim()}`)
-      .join('\n');
-    onSend(`【澄清回答】\n${text}\n请基于以上回答开始完整深度论证。`);
   };
+
   return (
-    <div className="mt-3 space-y-3">
-      {items.map((c, i) => (
-        <div key={i} className="rounded-2xl bg-[#f5f5f7] px-4 py-3">
-          <p className="text-[13.5px] font-medium text-[#1d1d1f]">
-            {String(i + 1).padStart(2, '0')}　{c.q}
-          </p>
-          {c.hint ? <p className="mt-0.5 text-[12px] text-[#86868b]">{c.hint}</p> : null}
-          <input
-            value={answers[i] ?? ''}
-            onChange={(e) => setAnswers((prev) => ({ ...prev, [i]: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && filled) send(false);
-            }}
-            placeholder="输入你的回答…"
-            className="mt-2 w-full rounded-xl border border-[#e8e8ed] bg-white px-3 py-2 text-[13.5px] text-[#1d1d1f] outline-none transition-colors placeholder:text-[#c7c7cc] focus:border-[#0071e3]"
+    <div className="mt-3">
+      {/* 进度指示：第几题 */}
+      <div className="mb-2.5 flex items-center gap-1.5">
+        {items.map((_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              i === idx ? 'w-5 bg-[#0071e3]' : i < idx ? 'w-1.5 bg-[#0071e3]/50' : 'w-1.5 bg-[#e8e8ed]'
+            }`}
           />
-        </div>
-      ))}
-      <div className="flex flex-wrap items-center gap-2">
+        ))}
+        <span className="ml-1 text-[11px] tabular-nums text-[#86868b]">
+          {idx + 1} / {items.length}
+        </span>
+      </div>
+
+      {/* 当前这题（切题时淡入） */}
+      <div key={idx} className="fade-in rounded-2xl bg-[#f5f5f7] px-4 py-3">
+        <p className="text-[13.5px] font-medium text-[#1d1d1f]">{c.q}</p>
+        {c.hint ? (
+          <button
+            onClick={() => setTyped(c.hint ?? '')}
+            className="jelly mt-1.5 inline-flex items-start gap-1 rounded-full bg-white/80 px-2.5 py-1 text-left text-[11.5px] leading-snug text-[#0071e3] shadow-[inset_0_0_0_1px_rgba(0,113,227,0.15)]"
+          >
+            💡 {c.hint}
+          </button>
+        ) : null}
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && typed.trim()) advance(typed.trim());
+          }}
+          placeholder="输入你的回答…（回车提交）"
+          className="mt-2 w-full rounded-xl border border-[#e8e8ed] bg-white px-3 py-2 text-[13.5px] text-[#1d1d1f] outline-none transition-colors focus:border-[#0071e3]"
+        />
+      </div>
+
+      {/* 操作：下一个 / 跳过 / 上一题 */}
+      <div className="mt-2.5 flex items-center gap-2">
         <button
-          onClick={() => send(false)}
-          disabled={!filled}
-          className="press rounded-full bg-[#0071e3] px-5 py-2 text-[13.5px] font-medium text-white transition-all hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:opacity-30"
+          onClick={() => advance(typed.trim())}
+          disabled={!typed.trim()}
+          className="jelly rounded-full bg-[#0071e3] px-4 py-1.5 text-[12.5px] font-medium text-white transition-all hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:opacity-30"
         >
-          回答完毕，开始论证
+          {last ? '✓ 回答完毕，开始论证' : '下一个 →'}
         </button>
         <button
-          onClick={() => send(true)}
-          className="rounded-full border border-[#e8e8ed] bg-white px-4 py-2 text-[13px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
+          onClick={() => advance('')}
+          className="rounded-full px-3 py-1.5 text-[12px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
         >
-          跳过澄清，直接论证
+          跳过这题
         </button>
+        {idx > 0 && (
+          <button
+            onClick={() => {
+              setIdx(idx - 1);
+              setTyped(answers[idx - 1] ?? '');
+            }}
+            className="rounded-full px-3 py-1.5 text-[12px] text-[#86868b] transition-colors hover:text-[#1d1d1f]"
+          >
+            ← 上一题
+          </button>
+        )}
       </div>
     </div>
   );
