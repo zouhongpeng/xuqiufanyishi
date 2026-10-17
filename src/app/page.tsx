@@ -53,6 +53,7 @@ interface ChatMsg {
   content: string;
   clarity?: number;
   category?: string;
+  ack?: string;
   clarity_desc?: string;
   missing_info?: string[];
   options?: DiagnosticOption[];
@@ -358,6 +359,7 @@ export default function Home() {
       content,
       clarity: typeof d.clarity === 'number' ? d.clarity : undefined,
       category: typeof d.category === 'string' ? d.category : undefined,
+      ack: typeof d.ack === 'string' && d.ack.trim() ? d.ack.trim() : undefined,
       clarity_desc: typeof d.clarity_desc === 'string' ? d.clarity_desc : undefined,
       missing_info: d.missing_info as string[] | undefined,
       options: d.options as ChatMsg['options'],
@@ -1229,6 +1231,14 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
               {msg.notice}
             </div>
           )}
+          {/* 先像正常聊天一样回应，再进入追问卡片 */}
+          {msg.ack && (
+            <div className="mb-2 flex items-end gap-2">
+              <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-[#f0f0f2] bg-[#f5f5f7] px-4 py-2.5 text-[15px] leading-7 text-[#1d1d1f]">
+                {msg.ack}
+              </div>
+            </div>
+          )}
           <DiagnosisCard
             clarity={msg.clarity ?? 0}
             category={msg.category ?? ''}
@@ -1255,6 +1265,11 @@ function MessageRow({ msg, onPick }: { msg: ChatMsg; onPick: (t: string) => void
         {!isUser && msg.notice && (
           <div className="mb-1.5 rounded-[12px] bg-[#f5f5f7] px-3.5 py-2 text-[12px] leading-5 text-[#86868b]">
             {msg.notice}
+          </div>
+        )}
+        {!isUser && !msg.report && msg.ack && (
+          <div className="mb-1.5 max-w-full rounded-2xl rounded-bl-sm border border-[#f0f0f2] bg-[#f5f5f7] px-4 py-2.5 text-[15px] leading-7 text-[#1d1d1f]">
+            {msg.ack}
           </div>
         )}
         <div
