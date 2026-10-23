@@ -11,7 +11,6 @@ import {
   FALLBACK_STAGES,
 } from '@/lib/workflowStream';
 import { appendTurn, turnCount } from '@/lib/sessionStore';
-import { checkRate, clientIp, RATE_RULES } from '@/lib/rateLimit';
 import { runDeepChain } from '@/lib/deepChain';
 
 export const runtime = 'nodejs';
@@ -83,13 +82,6 @@ export async function POST(req: Request) {
 
   const mode = rawMode === 'deep' ? 'deep' : 'quick';
   const msg = message.trim();
-
-  if (mode === 'quick') {
-    const rateRule = checkRate(`quick:${clientIp(req)}`, RATE_RULES.quick);
-    if (rateRule) {
-      return json(429, { error: `请求过于频繁（${rateRule.label}），请稍后再试` });
-    }
-  }
 
   const { context, turns } = appendTurn(sessionId, msg);
 
