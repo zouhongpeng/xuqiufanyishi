@@ -40,7 +40,7 @@
 - **五阶段**：①需求诊断(judge, deepseek-chat, clarity<=1 出追问 result) → ②多视角论证(deepseek-reasoner ×3 并行：A创新性/B科学性与可行性/C应用价值与红海风险，`reasoning_delta` 事件实时推思维链，maxTokens 4000) → ③评委质询(reasoner，合并三视角，能力边界/工作量/答辩风险) → ④报告整合(chat，`content_delta` 流式；**REPORT_SYSTEM 为六大板块模板：需求档案(含澄清问答)/五阶段论证(每小节≥3要点+阶段结论)/正反交锋(3-4组，`~~被推翻结论~~ → 转向结论`删除线语法)/需求地图(树状缩进)/行动清单(≥5条含建议角色+时间)/风险与预案(≥3条带应对)，全文≥2500字，maxTokens 4000**) → ⑤检查清单(reviewChecklist) **并行 buildStructured()**。`DEEP_PHASES` 为阶段定义；事件协议 `{type:'phase_start'|'phase_end'(elapsed_ms)|'reasoning_delta'(view A/B/C/grill)|'content_delta'|'result'|'error'|'done'|'phase_reset'}`
 - **结构化产物 structured**：`buildStructured(context, report, headers, scene)` 一次 chatText JSON 调用（judgeModel、temp 0.3、maxTokens 3500），输出 `{summary, archive?, stages[5]{name,summary,points≥3,conclusion}, debate[3-4]{topic,pro,con,resolved}, tree{label,basis,children}, actions≥5{task,priority,role,time}, risks≥3{risk,response}, card{title,conclusion,date}}`；**解析失败返回 null，前端降级纯文本报告**（StructuredBento/DebateView/NeedTree 不渲染，PrintFrame 用纯文本分页兜底）。
 - **降级链**：reasoner 失败/**30s 无输出**（`reasoningTimeoutMs: 30_000`）→ deepseek-chat + 「请逐步推理后再给结论」重试1次 → 仍失败抛错 → route 层 `phase_reset` 后回退 `streamDeepWorkflow`（扣子工作流 node 事件）→ 再失败发 `error`。无 COZE_PAT 时工作流路径自动走 `deepViaLLM`（judge+decomposeReport + notice）。
-- 频控（`src/lib/rateLimit.ts`，内存 Map per IP）：**深度模式不限流（RATE_RULES 仅剩 quick）；快速 5次/分**。超限 429。
+- 频控：**已移除**（原 `src/lib/rateLimit.ts` 的 IP 频控已删除，接口不限流）。
 - 多轮上下文由 `src/lib/sessionStore.ts` 共享（chat 与 deep-analysis 两个 route 共用）。
 - 扣子工作流代码保留：`workflow.ts`(deepRun 非流式兜底) + `workflowStream.ts`(streamDeepWorkflow/REVIEW_STAGES/FALLBACK_STAGES)；配置 `DEEP_CONFIG`。**实测：扣子账户当前欠费（Insufficient coze credits balance），工作流降级通道不可用，最终 error 事件兜底正常。**
 
@@ -83,7 +83,6 @@
 │   │   ├── knowledge.ts     # 知识库检索注入 + 查重粗匹配 + 依据角标数据
 │   │   ├── scenePrompts.ts  # 场景补充提示词读取
 │   │   ├── sessionStore.ts  # 多轮上下文（chat 与 deep-analysis 共享）
-│   │   ├── rateLimit.ts     # IP 频控（内存 Map；仅 quick 5/分，深度不限流）
 │   │   ├── usageLog.ts      # LLM 调用用量 JSON 文件持久化（.usage/）
 │   │   ├── history.ts       # 浏览器历史记录存取（localStorage，最近 20 条）
 │   │   ├── workflow.ts      # 扣子工作流非流式（降级通道）
