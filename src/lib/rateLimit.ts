@@ -1,5 +1,6 @@
 /**
- * 内存频控（单实例）：快速模式单 IP 每分钟 5 次。深度模式不限流（用户可连续发起）。
+ * 内存频控（单实例）：快速模式单 IP 每分钟 30 次（防滥用兜底，正常对话远用不到）。
+ * 深度模式不限流（用户可连续发起）。
  * 返回命中的限流规则（拒绝），null 表示放行。
  */
 export interface RateRule {
@@ -9,7 +10,7 @@ export interface RateRule {
 }
 
 export const RATE_RULES = {
-  quick: [{ windowMs: 60_000, max: 5, label: '每分钟 5 次' }],
+  quick: [{ windowMs: 60_000, max: 30, label: '每分钟 30 次' }],
 } as const;
 
 const buckets = new Map<string, number[]>();
