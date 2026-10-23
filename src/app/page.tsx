@@ -434,7 +434,11 @@ export default function Home() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         const errData = data as { detail?: string; error?: string };
-        pushSystem(`评审服务出错：${errData.detail || errData.error || '未知错误'}`);
+        if (res.status === 429) {
+          pushSystem('发送得有点频繁啦～请等大约一分钟再继续，评审师正在整理思路 ☕');
+        } else {
+          pushSystem(`评审服务出错：${errData.detail || errData.error || '未知错误'}`);
+        }
         return;
       }
       if (!res.body || !res.body.getReader) throw new Error('当前环境不支持流式连接');
